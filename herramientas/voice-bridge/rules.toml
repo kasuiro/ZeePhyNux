@@ -16,6 +16,16 @@ endpoint = "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/@c
 model = "whisper-large-v3-turbo"
 endpoint = "https://api.groq.com/openai/v1/audio/transcriptions"
 
+[tts]
+model_es = "@cf/deepgram/aura-2-es"
+model_en = "@cf/deepgram/aura-2-en"
+endpoint = "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{model}"
+speaker = "aquila"
+encoding = "mp3"
+timeout = 30
+max_chars = 2000
+player = "pw-play"
+
 [record]
 rate = 16000
 channels = 1

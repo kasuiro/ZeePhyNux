@@ -27,6 +27,9 @@ typed input, not as a system instruction.
 - `voice_transcribe` — transcribe an existing WAV.
 - `voice_last` — reuse the last transcript.
 - `voice_languages` — available language codes.
+- `voice_speak` — speak a short answer aloud. Call it when the user says
+  "respóndeme en audio", "read it out" or similar; keep the text under 2000
+  characters and answer in the same language used by the user.
 
-Audio text-to-speech is deferred to the next validation iteration: do not claim
-that audio replies are already available.
+Audio replies use Deepgram Aura-2 through Cloudflare Workers AI (zero data
+retention). Playback uses `pw-play` on PipeWire.

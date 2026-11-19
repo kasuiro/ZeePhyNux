@@ -7,8 +7,9 @@ transport run on this machine.
 
 ## Status
 
-Prototype, phase 1: push-to-talk -> Spanish transcription -> prompt in OpenCode.
-Audio replies (TTS) are deferred to the validation iteration.
+Prototype validated: push-to-talk -> Spanish transcription -> prompt in OpenCode,
+plus audio replies via Deepgram Aura-2 on Cloudflare Workers AI.
+The advanced TUI plugin is the next iteration.
 
 ## Layout
 
@@ -58,6 +59,7 @@ multilingual; `voice_languages` lists the codes used here.
 python3 tests/smoke.py
 python3 voicectl.py status
 python3 voicectl.py listen --seconds 5
+python3 voicectl.py speak "Prueba de audio"
 ```
 
 ## Privacy and limits
@@ -65,5 +67,6 @@ python3 voicectl.py listen --seconds 5
 - Audio is sent to the selected provider; keep credentials out of configs/logs.
 - Cloudflare Workers AI: zero data retention, `$0.000453` per audio minute.
 - Groq free tier (if selected): 20 RPM, ~2 h audio/hour, ~8 h/day, 25 MB/upload.
+- TTS: Deepgram Aura-2 (`$0.03/1k chars`), MP3 saved to `reply.mp3` in state dir.
 - Rollback: disable the `voice` MCP server, remove the two Hyprland binds, and
   leave `~/.local/state/voice-bridge/` untouched for inspection.

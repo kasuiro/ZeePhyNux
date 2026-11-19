@@ -10,7 +10,8 @@ is delegated to a hosted Whisper provider — Cloudflare Workers AI by default
 (zero data retention), Groq as an alternative. The transcript becomes an
 ordinary user prompt.
 
-Audio replies (TTS) are deliberately deferred to the validation iteration.
+Audio replies (TTS) were validated on 2026-11-19 with Deepgram Aura-2 via
+Cloudflare Workers AI (Spanish and English voices, zero data retention).
 
 ## 2. Decisions (locked 2026-11-18)
 
@@ -23,6 +24,7 @@ Audio replies (TTS) are deliberately deferred to the validation iteration.
 | Delivery | kitty Wayland PTY master, automatic fallback to `wl-copy` |
 | Agent access | local stdio MCP server `voice`: `listen`, `transcribe`, `last`, `languages` |
 | Fallback | `/voice` command injects `last.txt` through a shell block |
+| TTS | `@cf/deepgram/aura-2-es` / `-en` (MP3 via `pw-play`, `$0.03/1k chars`) |
 | Secret | `~/.config/voice-bridge/{cf_token,cf_account,key}` (0600) or env; never in `rules.toml` or logs |
 | Limits | Cloudflare: Worker AI free allocation; Groq: 20 RPM, 7.2K audio-seconds/hour, 28.8K/day, 25 MB/upload |
 
@@ -49,6 +51,7 @@ key up   ─→ hosted Whisper ─→ last.txt + last.json ─→ PTY master / c
 | `voice_transcribe(path, language?, hint?)` | transcript of an existing WAV |
 | `voice_last()` | last transcript, no recording |
 | `voice_languages()` | supported ISO-639-1 codes |
+| `voice_speak(text, language?, play?)` | synthesize an MP3 reply and play it via PipeWire |
 
 The `voice-context` skill supplies vocabulary (`OpenCode`, `Hyprland`,
 `Questline`, `linux zeep`, `PipeWire`, `MCP`, `voice-bridge`, `push to talk`) to
@@ -57,9 +60,10 @@ the Whisper `prompt` field (max 224 tokens) and to the agent.
 ## 5. Verification
 
 ```sh
-python3 herramientas/voice-bridge/tests/smoke.py   # 12 offline checks
+python3 herramientas/voice-bridge/tests/smoke.py   # 19 offline checks
 python3 herramientas/voice-bridge/voicectl.py status
 python3 herramientas/voice-bridge/voicectl.py listen --seconds 5
+python3 herramientas/voice-bridge/voicectl.py speak "Prueba de audio"
 luac -p ~/.config/hypr/UserConfigs/user_keybinds.lua
 ```
 
@@ -73,5 +77,6 @@ luac -p ~/.config/hypr/UserConfigs/user_keybinds.lua
 
 ## 7. Next iteration
 
-Add `voice_speak` (Groq TTS) and test the full loop: dictate -> answer in audio.
-Then evaluate the advanced TUI plugin with an in-composer keybind.
+Evaluate the advanced TUI plugin with an in-composer keybind, so dictation and
+audio confirmation stay inside OpenCode without relying on the focused kitty
+window. Also add a per-user voice preference (speaker and rate) in `rules.toml`.

@@ -54,6 +54,19 @@ TOOLS = [
         "description": "List the language codes available for transcription.",
         "inputSchema": {"type": "object", "properties": {}},
     },
+    {
+        "name": "speak",
+        "description": "Speak an answer aloud with Cloudflare TTS. Use when the user asks for an audio reply.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string", "description": "text to synthesize (max 2000 chars)"},
+                "language": {"type": "string", "description": "es or en (default: configured)"},
+                "play": {"type": "boolean", "description": "play the audio now (default true)"},
+            },
+            "required": ["text"],
+        },
+    },
 ]
 
 
@@ -87,8 +100,17 @@ def tool_languages(_):
     return {"languages": LANGUAGES, "default": voicectl.load_rules()["stt"].get("language", "es")}
 
 
+def tool_speak(args):
+    text = str(args.get("text", "")).strip()
+    if not text:
+        raise ValueError("text is required")
+    return voicectl.speak(text, voicectl.load_rules(),
+                          language=args.get("language"),
+                          play=bool(args.get("play", True)))
+
+
 TOOL_FUNCS = {"listen": tool_listen, "transcribe": tool_transcribe,
-              "last": tool_last, "languages": tool_languages}
+              "last": tool_last, "languages": tool_languages, "speak": tool_speak}
 
 
 def respond(request):

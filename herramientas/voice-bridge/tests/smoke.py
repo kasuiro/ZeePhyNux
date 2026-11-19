@@ -128,7 +128,38 @@ class VoiceBridgeSmoke(unittest.TestCase):
         self.assertFalse(info["recording"])
         self.assertEqual(info["provider"], "cloudflare")
         self.assertEqual(info["language"], "es")
+        self.assertEqual(info["tts_model"], "@cf/deepgram/aura-2-es")
         self.assertIn("state", info)
+
+    def test_speak_request_and_response(self):
+        env = {"CLOUDFLARE_API_TOKEN": "cf-token", "CF_ACCOUNT_ID": "acct"}
+        with mock.patch.dict("os.environ", env), \
+                mock.patch("urllib.request.urlopen",
+                           return_value=FakeResponse(b"ID3fake-mp3")) as request, \
+                mock.patch("subprocess.run") as play:
+            result = voicectl.speak("hola mundo", self.rules, play=True)
+        self.assertEqual(result["model"], "@cf/deepgram/aura-2-es")
+        self.assertEqual(result["bytes"], len(b"ID3fake-mp3"))
+        self.assertTrue(result["played"])
+        self.assertTrue(pathlib.Path(result["path"]).is_file())
+        args = request.call_args.args[0]
+        self.assertIn("@cf/deepgram/aura-2-es", args.full_url)
+        body = json.loads(args.data)
+        self.assertEqual(body["text"], "hola mundo")
+        self.assertEqual(body["encoding"], "mp3")
+        self.assertEqual(play.call_args.args[0][0], "pw-play")
+
+    def test_speak_without_playback(self):
+        env = {"CLOUDFLARE_API_TOKEN": "cf-token", "CF_ACCOUNT_ID": "acct"}
+        with mock.patch.dict("os.environ", env), \
+                mock.patch("urllib.request.urlopen",
+                           return_value=FakeResponse(b"ID3fake")), \
+                mock.patch("subprocess.run") as play:
+            result = voicectl.speak("hola", self.rules, language="en", play=False)
+        self.assertEqual(result["language"], "en")
+        self.assertEqual(result["model"], "@cf/deepgram/aura-2-en")
+        self.assertFalse(result["played"])
+        play.assert_not_called()
 
     def test_deliver_none(self):
         self.assertEqual(voicectl.deliver("hola", self.rules), "none")
@@ -148,7 +179,7 @@ class VoiceBridgeSmoke(unittest.TestCase):
         self.assertEqual(init["result"]["serverInfo"]["name"], "voice-bridge")
         tools = mcp.respond({"id": 2, "method": "tools/list"})
         names = [tool["name"] for tool in tools["result"]["tools"]]
-        self.assertEqual(names, ["listen", "transcribe", "last", "languages"])
+        self.assertEqual(names, ["listen", "transcribe", "last", "languages", "speak"])
 
     def test_mcp_last_and_languages(self):
         (voicectl.state_dir(self.rules) / "last.txt").write_text("hola")
@@ -159,6 +190,16 @@ class VoiceBridgeSmoke(unittest.TestCase):
         result = mcp.respond({"id": 4, "method": "tools/call",
                               "params": {"name": "languages", "arguments": {}}})
         self.assertIn("es", json.loads(result["result"]["content"][0]["text"])["languages"])
+
+    def test_mcp_speak(self):
+        reply = {"text": "hola", "model": "@cf/deepgram/aura-2-es", "played": False}
+        with mock.patch.object(voicectl, "speak", return_value=reply) as speak:
+            result = mcp.respond({"id": 6, "method": "tools/call",
+                                  "params": {"name": "speak",
+                                             "arguments": {"text": "hola", "play": False}}})
+        payload = json.loads(result["result"]["content"][0]["text"])
+        self.assertEqual(payload["model"], "@cf/deepgram/aura-2-es")
+        self.assertFalse(speak.call_args.kwargs["play"])
 
     def test_mcp_listen_error_shape(self):
         with mock.patch.object(voicectl, "listen",

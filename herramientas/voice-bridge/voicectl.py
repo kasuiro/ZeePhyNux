@@ -343,6 +343,60 @@ def last(rules=None):
     return path.read_text(encoding="utf-8") if path.is_file() else ""
 
 
+def speak(text, rules=None, language=None, play=True):
+    """Synthesize a spoken reply with Cloudflare Workers AI and optionally play it."""
+    rules = rules or load_rules()
+    content = str(text).strip()
+    if not content:
+        raise ValueError("text is required")
+    tts = rules.get("tts", {})
+    limit = int(tts.get("max_chars", 2000))
+    if len(content) > limit:
+        raise ValueError(f"text too long ({len(content)} > {limit} characters)")
+    lang = (language or rules["stt"].get("language", "es")).lower()[:2]
+    model = tts.get("model_en" if lang == "en" else "model_es",
+                    "@cf/deepgram/aura-2-es")
+    token, account = cloudflare_credentials()
+    if not token or not account:
+        raise RuntimeError(
+            "Cloudflare credentials missing: CLOUDFLARE_API_TOKEN / CF_ACCOUNT_ID "
+            "or ~/.config/voice-bridge/{cf_token,cf_account}")
+    endpoint = tts.get(
+        "endpoint",
+        "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{model}"
+    ).format(account_id=account, model=model)
+    body = json.dumps({
+        "text": content,
+        "speaker": tts.get("speaker", "aquila"),
+        "encoding": tts.get("encoding", "mp3"),
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        endpoint, data=body,
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=int(tts.get("timeout", 30))) as response:
+            audio = response.read()
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"Cloudflare TTS HTTP {exc.code}: {exc.reason}") from exc
+    if not audio:
+        raise RuntimeError("Cloudflare TTS returned no audio")
+    path = state_dir(rules) / "reply.mp3"
+    path.write_bytes(audio)
+    played = False
+    if play:
+        player = tts.get("player", "pw-play")
+        try:
+            subprocess.run([player, str(path)], check=True, capture_output=True,
+                           timeout=60)
+            played = True
+        except (OSError, subprocess.SubprocessError) as exc:
+            notify(f"voice-bridge: audio saved but playback failed: {exc}")
+    return {"text": content[:200], "language": lang, "model": model,
+            "path": str(path), "bytes": len(audio), "played": played}
+
+
 def status(rules=None):
     rules = rules or load_rules()
     state = state_dir(rules)
@@ -354,6 +408,7 @@ def status(rules=None):
             "last": last(rules)[:200],
             "model": provider["model"],
             "language": provider["language"],
+            "tts_model": rules.get("tts", {}).get("model_es", ""),
             "deliver": rules["deliver"].get("backend", "none")}
 
 
@@ -368,6 +423,11 @@ def main(argv=None):
     p_transcribe.add_argument("file")
     p_transcribe.add_argument("--language", default=None)
     sub.add_parser("last", help="print the last transcript")
+    p_speak = sub.add_parser("speak", help="synthesize and play a reply")
+    p_speak.add_argument("text")
+    p_speak.add_argument("--language", default=None)
+    p_speak.add_argument("--no-play", action="store_true",
+                         help="save the MP3 without playing it")
     sub.add_parser("status", help="show configuration status")
     for name in ("start", "stop", "listen", "transcribe"):
         sub.choices[name].add_argument("--mock", action="store_true",
@@ -383,6 +443,8 @@ def main(argv=None):
             result = listen(args.seconds, rules, args.mock)
         elif args.cmd == "transcribe":
             result = transcribe_file(args.file, rules, args.language, mock=args.mock)
+        elif args.cmd == "speak":
+            result = speak(args.text, rules, args.language, play=not args.no_play)
         elif args.cmd == "last":
             print(last(rules))
             return 0
