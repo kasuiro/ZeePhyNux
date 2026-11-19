@@ -10,10 +10,19 @@
  */
 
 import { Plugin } from "@opencode/plugin/tui"
-import { writeFileSync } from "node:fs"
+import { appendFileSync, writeFileSync } from "node:fs"
 
-const LOAD_MARKER =
-  "/home/dev/.local/state/voice-bridge/plugin-load.json"
+const STATE_DIR = "/home/dev/.local/state/voice-bridge"
+const LOAD_MARKER = `${STATE_DIR}/plugin-load.json`
+const DEBUG_LOG = `${STATE_DIR}/plugin-debug.log`
+
+function debug(message) {
+  try {
+    appendFileSync(DEBUG_LOG, `[${new Date().toISOString()}] ${message}\n`)
+  } catch {
+    // Diagnóstico best-effort.
+  }
+}
 
 const VOICECTL =
   "/home/dev/Documentos/Debian_Hyprland_Look_And_Feel/herramientas/voice-bridge/voicectl.py"
@@ -93,28 +102,38 @@ async function pasteIntoComposer(context) {
 }
 
 async function dictate(context) {
-  if (busy) return
+  debug(`key press (busy=${busy}, recording=${recording})`)
+  if (busy) {
+    debug("ignored: busy")
+    return
+  }
   busy = true
   try {
     if (!recording) {
-      await voicectl(["start"])
+      const raw = await voicectl(["start"])
+      debug(`start -> ${raw}`)
       recording = true
       notify(context, "Grabando… pulsa Ctrl+Alt+V para terminar")
+      debug("toast grabando enviado")
       return
     }
 
     recording = false
     notify(context, "Transcribiendo…")
     const raw = await voicectl(["stop"])
+    debug(`stop -> ${raw.slice(0, 200)}`)
     const result = JSON.parse(raw)
     const text = String(result.text || "").trim()
     if (!text) {
       notify(context, "Sin transcripción", "warning")
+      debug("sin transcripcion")
       return
     }
 
     await copyToClipboard(text)
+    debug("copiado al portapapeles")
     const pasted = await pasteIntoComposer(context)
+    debug(`paste -> ${pasted}`)
     notify(
       context,
       pasted
@@ -130,15 +149,18 @@ async function dictate(context) {
     }
   } catch (error) {
     recording = false
+    debug(`ERROR: ${error.message || error}`)
     notify(context, `voice-bridge: ${error.message || error}`, "error")
   } finally {
     busy = false
+    debug("finally")
   }
 }
 
 export default Plugin.define({
   id: "voice-bridge-tui",
   setup(context) {
+    debug("setup init")
     try {
       writeFileSync(
         LOAD_MARKER,
