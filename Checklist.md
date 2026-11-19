@@ -38,10 +38,11 @@
 
 ## Fase D - Buzon de assets
 - [x] galeria/_inbox/ + dudas/ + LEEME.md con instrucciones
-- [x] GalleryIntake.py (clasifica por personajes_mapeo.json, normaliza a PNG <=512, registra en ASSETS_TRACKER.md)
+- [x] GalleryIntake.py (antes clasificaba por personajes_mapeo.json —retirado—, normaliza a PNG <=512, registra en ASSETS_TRACKER.md)
 - [x] Probado con 3 archivos sinteticos: 2 clasificados, 1 a dudas, tracker actualizado
 - [x] Enrutado por categoria cuando no hay personaje (sticker/meme/gift/personaje -> aportes--<slug>) - probado con 5 sinteticos
 - [x] Imagenes del usuario ingeridas: 21 el 2026-11-18; el buzon ya no espera nada
+- [x] Base simple 2026-11-19: retirados 3 PNG sueltos, personajes_mapeo.json y 2 copias .bak; sin mapas de personajes, cada persona aporta su propia personalizacion
 - [x] Criterio IA: aceptada si es codigo abierto o plan free y no consume recursos locales (2026-11-15)
 - [x] Proveedor elegido: Cloudflare Workers AI FLUX.1 schnell (~230 img/dia gratis, Apache-2.0)
 - [x] GalleryGen.py + README + prompts.txt en herramientas/gallery-gen/ (dry-run y lotes reales OK)
