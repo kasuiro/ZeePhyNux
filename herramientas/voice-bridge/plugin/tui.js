@@ -69,18 +69,23 @@ function voicectl(args) {
 function copyToClipboard(text) {
   return import("node:child_process").then(
     ({ spawn }) =>
-      new Promise((resolve, reject) => {
-        const child = spawn("wl-copy", [], { stdio: ["pipe", "ignore", "pipe"] })
-        let stderr = ""
-        child.stderr.on("data", (chunk) => {
-          stderr += chunk
+      new Promise((resolve) => {
+        // wl-copy forks into the background to own the selection. The daemon
+        // keeps inherited stdio open, so waiting for "close" hangs forever.
+        // "exit" fires as soon as the direct child hands off the selection.
+        const child = spawn("wl-copy", [], {
+          stdio: ["pipe", "ignore", "ignore"],
         })
-        child.on("error", reject)
-        child.on("close", (code) => {
-          if (code === 0) resolve()
-          else reject(new Error(stderr.trim() || `wl-copy exited ${code}`))
-        })
+        let settled = false
+        const done = () => {
+          if (settled) return
+          settled = true
+          resolve()
+        }
+        child.on("error", done)
+        child.on("exit", done)
         child.stdin.end(text)
+        setTimeout(done, 1500)
       })
   )
 }
@@ -108,6 +113,14 @@ async function dictate(context) {
     return
   }
   busy = true
+  // Safety net: a hung child process must never lock the toggle permanently.
+  const watchdog = setTimeout(() => {
+    if (!busy) return
+    debug("watchdog: busy timeout, reiniciando estado")
+    busy = false
+    recording = false
+    notify(context, "voice-bridge: timeout, listo para reintentar", "warning")
+  }, 120000)
   try {
     if (!recording) {
       const raw = await voicectl(["start"])
@@ -152,6 +165,7 @@ async function dictate(context) {
     debug(`ERROR: ${error.message || error}`)
     notify(context, `voice-bridge: ${error.message || error}`, "error")
   } finally {
+    clearTimeout(watchdog)
     busy = false
     debug("finally")
   }
