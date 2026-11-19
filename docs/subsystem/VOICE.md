@@ -113,3 +113,11 @@ with no stuck state, transcript and clipboard matching, and 22/22 offline tests
 still passing. Spoken replies use the same Deepgram Aura-2 path through the
 `voice_speak` tool; the `aquila` speaker is Spanish-only (English returns HTTP
 400), so spoken replies are Spanish by default.
+
+After pasting, the plugin dispatches `input.submit` (the composer's Return
+binding) so a user who cannot see the keyboard does not have to press Enter.
+`prompt.submit` exists in the keymap but is a no-op for the active composer, so
+`input.submit` is preferred. Verified against the API: the transcript appears
+as a real `user` message in the session. The confirmation spoken afterwards is
+"Entendido, mensaje enviado"; on failure the bridge says the text is in the
+clipboard instead. `AUTO_SUBMIT` in `plugin/tui.js` can disable this behavior.

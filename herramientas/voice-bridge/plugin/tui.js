@@ -3,8 +3,8 @@
  *
  * Ctrl+Alt+V toggles push-to-talk inside OpenCode:
  *   1st press -> record
- *   2nd press -> transcribe, copy to clipboard, paste into the composer
- *              and speak a short confirmation with the configured voice.
+ *   2nd press -> transcribe, copy to clipboard, paste into the composer,
+ *              submit it with Enter and speak a short confirmation.
  *
  * No credentials are read or stored here; voicectl.py owns that.
  */
@@ -15,6 +15,10 @@ import { appendFileSync, writeFileSync } from "node:fs"
 const STATE_DIR = "/home/dev/.local/state/voice-bridge"
 const LOAD_MARKER = `${STATE_DIR}/plugin-load.json`
 const DEBUG_LOG = `${STATE_DIR}/plugin-debug.log`
+
+// Accessibility: submit the dictated message without requiring the user to
+// find and press Enter. Set to false to leave the transcript in the composer.
+const AUTO_SUBMIT = true
 
 function debug(message) {
   try {
@@ -106,6 +110,29 @@ async function pasteIntoComposer(context) {
   return false
 }
 
+async function submitPrompt(context) {
+  if (!AUTO_SUBMIT) return "disabled"
+  let available = []
+  try {
+    const commands = context.keymap?.commands?.() ?? []
+    available = commands.map((command) => command.id).filter(Boolean)
+  } catch {
+    // Try both known submit IDs below.
+  }
+  // input.submit is the composer's Return binding; prompt.submit exists in
+  // the keymap but is a no-op for the active composer.
+  for (const id of ["input.submit", "prompt.submit"]) {
+    if (available.length > 0 && !available.includes(id)) continue
+    try {
+      await context.keymap.dispatch(id)
+      return id
+    } catch {
+      // Try the next submit command ID.
+    }
+  }
+  return null
+}
+
 async function dictate(context) {
   debug(`key press (busy=${busy}, recording=${recording})`)
   if (busy) {
@@ -147,16 +174,27 @@ async function dictate(context) {
     debug("copiado al portapapeles")
     const pasted = await pasteIntoComposer(context)
     debug(`paste -> ${pasted}`)
-    notify(
-      context,
-      pasted
-        ? `Dictado: ${text.slice(0, 80)}`
-        : `Copiado, pega con Ctrl+V: ${text.slice(0, 60)}`,
-      "success"
-    )
+    const submitted = pasted ? await submitPrompt(context) : null
+    debug(`submit -> ${submitted}`)
+
+    if (pasted && submitted) {
+      notify(context, `Enviado: ${text.slice(0, 80)}`, "success")
+    } else {
+      notify(
+        context,
+        `Copiado, pega con Ctrl+V: ${text.slice(0, 60)}`,
+        "warning"
+      )
+    }
 
     try {
-      await voicectl(["speak", "Entendido"])
+      const confirmation =
+        submitted === "disabled"
+          ? "Listo, el texto está en el mensaje"
+          : submitted
+            ? "Entendido, mensaje enviado"
+            : "No pude enviar el mensaje, el texto está en el portapapeles"
+      await voicectl(["speak", confirmation])
     } catch {
       // Audio confirmation is best-effort; the transcript is already delivered.
     }
