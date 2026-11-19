@@ -121,3 +121,21 @@ binding) so a user who cannot see the keyboard does not have to press Enter.
 as a real `user` message in the session. The confirmation spoken afterwards is
 "Entendido, mensaje enviado"; on failure the bridge says the text is in the
 clipboard instead. `AUTO_SUBMIT` in `plugin/tui.js` can disable this behavior.
+
+## 8. Bilingual operation (es / en)
+
+`[stt].language = "auto"` lets Cloudflare Whisper detect the spoken language;
+`detect_language()` reports `es` or `en` heuristically from the transcript.
+`[voice].language` follows the same rule: `auto` detects from the reply text, or
+it can be forced to `es`/`en`. TTS selects the model and speaker per language:
+
+| Language | Model | Speaker |
+| --- | --- | --- |
+| `es` | `@cf/deepgram/aura-2-es` | `aquila` |
+| `en` | `@cf/deepgram/aura-2-en` | `asteria` |
+
+The `voice_speak` MCP tool accepts `language: "es" | "en"`; callers should pass
+the language of the message being answered. English with the Spanish-only
+`aquila` voice returns HTTP 400, so per-language speakers are required.
+Values are in `rules.toml` under `[tts]` and `[voice]`. Python module or rule
+changes need `/reload` so the MCP server re-imports `voicectl.py`.

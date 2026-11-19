@@ -4,7 +4,7 @@
 
 [stt]
 provider = "cloudflare"          # cloudflare | groq
-language = "es"                  # Cloudflare auto-detects; used for reporting
+language = "auto"                # Cloudflare detects es/en from the audio
 timeout = 30
 hint = "OpenCode, Hyprland, Questline, linux zeep, PipeWire, MCP, voice-bridge, push to talk"
 
@@ -20,15 +20,19 @@ endpoint = "https://api.groq.com/openai/v1/audio/transcriptions"
 model_es = "@cf/deepgram/aura-2-es"
 model_en = "@cf/deepgram/aura-2-en"
 endpoint = "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{model}"
-speaker = "aquila"
+speaker = "aquila"               # fallback for es
+speaker_es = "aquila"            # Deepgram Aura-2 es
+speaker_en = "asteria"           # Deepgram Aura-2 en
 encoding = "mp3"
 timeout = 30
 max_chars = 2000
 player = "pw-play"
 
 [voice]
-# Per-user playback preference used by the TUI plugin confirmations.
-speaker = "aquila"               # Deepgram Aura-2 voice; falls back to [tts].speaker
+# Bilingual spoken replies: auto follows the detected language, or force es/en.
+language = "auto"                # auto | es | en
+speaker_es = "aquila"            # Deepgram Aura-2 es
+speaker_en = "asteria"           # Deepgram Aura-2 en
 rate = 1.0                       # 0.5–2.0; applied locally with ffmpeg atempo
 
 [record]

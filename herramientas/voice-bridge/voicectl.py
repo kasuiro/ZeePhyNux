@@ -17,6 +17,7 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import select
 import signal
 import subprocess
@@ -135,17 +136,43 @@ def _multipart(path, fields):
     return b"".join(chunks), f"multipart/form-data; boundary={boundary}"
 
 
+SPANISH_MARKERS = re.compile(
+    r"[¿¡ñáéíóúü]|\b(?:el|la|los|las|de|del|que|y|en|un|una|es|no|con|para|"
+    r"por|pero|muy|también|hola|gracias|necesito|quiero|puede|puedes|estamos|"
+    r"mensaje|listo|sonríe)\b",
+    re.IGNORECASE,
+)
+ENGLISH_MARKERS = re.compile(
+    r"\b(?:the|and|is|are|you|for|with|this|that|have|need|want|hello|thanks|"
+    r"thank|please|message|yes|ready|smile|okay|ok|we|it|to|of|in)\b",
+    re.IGNORECASE,
+)
+
+
+def detect_language(text, default="es"):
+    """Best-effort es/en detection for reporting and voice selection."""
+    sample = str(text or "")[:2000]
+    spanish = len(SPANISH_MARKERS.findall(sample))
+    english = len(ENGLISH_MARKERS.findall(sample))
+    if spanish > english:
+        return "es"
+    if english > spanish:
+        return "en"
+    return default
+
+
 def transcribe_file(path, rules=None, language=None, hint=None, mock=False):
     """Return {text, language, model, seconds} using the configured provider."""
     rules = rules or load_rules()
     provider = provider_config(rules["stt"])
     lang = language or provider["language"]
     if mock:
-        return {"text": "mock transcription", "language": lang,
+        return {"text": "mock transcription",
+                "language": "es" if lang == "auto" else lang,
                 "model": "mock", "seconds": wav_seconds(path)}
     if provider["name"] == "cloudflare":
-        return _transcribe_cloudflare(path, provider, hint)
-    return _transcribe_groq(path, provider, lang, hint)
+        return _transcribe_cloudflare(path, provider, hint, lang)
+    return _transcribe_groq(path, provider, "es" if lang == "auto" else lang, hint)
 
 
 def _read_audio(path):
@@ -179,7 +206,7 @@ def _transcribe_groq(path, provider, lang, hint):
             "model": provider["model"], "seconds": wav_seconds(path)}
 
 
-def _transcribe_cloudflare(path, provider, hint):
+def _transcribe_cloudflare(path, provider, hint, lang="es"):
     # Cloudflare Whisper takes raw audio and auto-detects the language; the
     # vocabulary hint is a Groq-only feature and is intentionally ignored.
     del hint
@@ -203,8 +230,9 @@ def _transcribe_cloudflare(path, provider, hint):
         detail = ", ".join(str(item.get("message", item))
                            for item in result.get("errors", []))
         raise RuntimeError(f"Cloudflare Workers AI error: {detail or 'unknown'}")
-    return {"text": (result.get("result", {}).get("text") or "").strip(),
-            "language": provider["language"], "model": provider["model"],
+    text = (result.get("result", {}).get("text") or "").strip()
+    reported = detect_language(text, "es") if lang == "auto" else lang
+    return {"text": text, "language": reported, "model": provider["model"],
             "seconds": wav_seconds(path)}
 
 
@@ -367,9 +395,18 @@ def speak(text, rules=None, language=None, play=True):
     limit = int(tts.get("max_chars", 2000))
     if len(content) > limit:
         raise ValueError(f"text too long ({len(content)} > {limit} characters)")
-    lang = (language or rules["stt"].get("language", "es")).lower()[:2]
-    model = tts.get("model_en" if lang == "en" else "model_es",
-                    "@cf/deepgram/aura-2-es")
+    configured = str(
+        language or voice.get("language") or rules["stt"].get("language", "es")
+    ).lower()
+    lang = (detect_language(content, "es") if configured.startswith("auto")
+            else configured[:2])
+    if lang not in ("es", "en"):
+        lang = "es"
+    model = tts.get(f"model_{lang}", "@cf/deepgram/aura-2-es")
+    speaker = voice.get(
+        f"speaker_{lang}",
+        tts.get(f"speaker_{lang}", tts.get("speaker", "aquila")),
+    )
     token, account = cloudflare_credentials()
     if not token or not account:
         raise RuntimeError(
@@ -381,7 +418,7 @@ def speak(text, rules=None, language=None, play=True):
     ).format(account_id=account, model=model)
     body = json.dumps({
         "text": content,
-        "speaker": voice.get("speaker", tts.get("speaker", "aquila")),
+        "speaker": speaker,
         "encoding": tts.get("encoding", "mp3"),
     }).encode("utf-8")
     request = urllib.request.Request(
@@ -420,9 +457,8 @@ def speak(text, rules=None, language=None, play=True):
         except (OSError, subprocess.SubprocessError) as exc:
             notify(f"voice-bridge: audio saved but playback failed: {exc}")
     return {"text": content[:200], "language": lang, "model": model,
-            "speaker": voice.get("speaker", tts.get("speaker", "aquila")),
-            "rate": rate, "path": str(path), "bytes": len(audio),
-            "played": played}
+            "speaker": speaker, "rate": rate, "path": str(path),
+            "bytes": len(audio), "played": played}
 
 
 def status(rules=None):

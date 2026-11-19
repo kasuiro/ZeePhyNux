@@ -42,7 +42,7 @@ class VoiceBridgeSmoke(unittest.TestCase):
         self.assertEqual(self.rules["stt"]["provider"], "cloudflare")
         self.assertEqual(self.rules["stt"]["providers"]["cloudflare"]["model"],
                          "@cf/openai/whisper")
-        self.assertEqual(self.rules["stt"]["language"], "es")
+        self.assertEqual(self.rules["stt"]["language"], "auto")
         self.assertEqual(self.rules["deliver"]["backend"], "none")
 
     def test_no_key_by_default(self):
@@ -132,7 +132,7 @@ class VoiceBridgeSmoke(unittest.TestCase):
         info = voicectl.status(self.rules)
         self.assertFalse(info["recording"])
         self.assertEqual(info["provider"], "cloudflare")
-        self.assertEqual(info["language"], "es")
+        self.assertEqual(info["language"], "auto")
         self.assertEqual(info["tts_model"], "@cf/deepgram/aura-2-es")
         self.assertIn("state", info)
 
@@ -168,7 +168,7 @@ class VoiceBridgeSmoke(unittest.TestCase):
 
     def test_voice_preferences(self):
         rules = copy.deepcopy(self.rules)
-        rules["voice"] = {"speaker": "nova", "rate": 1.0}
+        rules["voice"] = {"speaker_es": "nova", "rate": 1.0}
         env = {"CLOUDFLARE_API_TOKEN": "cf-token", "CF_ACCOUNT_ID": "acct"}
         with mock.patch.dict("os.environ", env), \
                 mock.patch("urllib.request.urlopen",
@@ -179,6 +179,25 @@ class VoiceBridgeSmoke(unittest.TestCase):
         self.assertEqual(body["speaker"], "nova")
         self.assertEqual(result["speaker"], "nova")
         self.assertEqual(result["rate"], 1.0)
+
+    def test_detect_language_bilingual(self):
+        self.assertEqual(voicectl.detect_language("Hola, ¿cómo estás?"), "es")
+        self.assertEqual(voicectl.detect_language("Hello, how are you?"), "en")
+        self.assertEqual(voicectl.detect_language("...", default="en"), "en")
+
+    def test_english_uses_english_voice(self):
+        env = {"CLOUDFLARE_API_TOKEN": "cf-token", "CF_ACCOUNT_ID": "acct"}
+        with mock.patch.dict("os.environ", env), \
+                mock.patch("urllib.request.urlopen",
+                           return_value=FakeResponse(b"ID3fake")) as request, \
+                mock.patch("subprocess.run"):
+            result = voicectl.speak(
+                "Hello, please send the message", self.rules, language="en",
+                play=False)
+        body = json.loads(request.call_args.args[0].data)
+        self.assertEqual(result["model"], "@cf/deepgram/aura-2-en")
+        self.assertEqual(body["speaker"], "asteria")
+        self.assertEqual(result["speaker"], "asteria")
 
     def test_voice_rate_uses_ffmpeg(self):
         rules = copy.deepcopy(self.rules)
