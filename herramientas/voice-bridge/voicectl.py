@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """voice-bridge control CLI: capture, transcribe and deliver spoken input.
 
-Zero third-party dependencies. The API key is read from GROQ_API_KEY, from the
-file named by VOICE_KEY_FILE, or from ~/.config/voice-bridge/key (0600); this
-module never writes the key to disk.
+Zero third-party dependencies. Credentials come from env vars or 0600 files in
+~/.config/voice-bridge/: key (Groq), cf_token and cf_account (Cloudflare).
+No secret is ever written to disk by this module.
+
+Set [stt].provider in rules.toml to "cloudflare" or "groq".
 
     voicectl.py start          # push-to-talk key down
     voicectl.py stop           # key up: transcribe + deliver
@@ -27,6 +29,8 @@ import wave
 ROOT = pathlib.Path(__file__).resolve().parent
 DEFAULT_RULES = ROOT / "rules.toml"
 DEFAULT_KEY_FILE = pathlib.Path.home() / ".config/voice-bridge/key"
+DEFAULT_CF_TOKEN_FILE = pathlib.Path.home() / ".config/voice-bridge/cf_token"
+DEFAULT_CF_ACCOUNT_FILE = pathlib.Path.home() / ".config/voice-bridge/cf_account"
 
 
 def load_rules(path=DEFAULT_RULES):
@@ -62,6 +66,40 @@ def key_ready():
     return bool(api_key())
 
 
+def _credential(env_name, default_file):
+    value = os.environ.get(env_name, "").strip()
+    if value:
+        return value
+    path = pathlib.Path(default_file).expanduser()
+    if path.is_file():
+        return path.read_text(encoding="utf-8").strip()
+    return ""
+
+
+def cloudflare_credentials():
+    return (_credential("CLOUDFLARE_API_TOKEN", DEFAULT_CF_TOKEN_FILE),
+            _credential("CF_ACCOUNT_ID", DEFAULT_CF_ACCOUNT_FILE))
+
+
+def credential_ready(rules=None):
+    rules = rules or load_rules()
+    if provider_config(rules["stt"])["name"] == "cloudflare":
+        return all(cloudflare_credentials())
+    return key_ready()
+
+
+def provider_config(stt):
+    name = stt.get("provider", "groq")
+    config = dict(stt.get("providers", {}).get(name, {}))
+    config.setdefault("model", stt.get("model", ""))
+    config.setdefault("endpoint", stt.get("endpoint", ""))
+    config["name"] = name
+    config["language"] = stt.get("language", "es")
+    config["timeout"] = int(stt.get("timeout", 30))
+    config["hint"] = stt.get("hint", "")
+    return config
+
+
 def wav_seconds(path):
     try:
         with wave.open(str(path), "rb") as handle:
@@ -90,38 +128,76 @@ def _multipart(path, fields):
 
 
 def transcribe_file(path, rules=None, language=None, hint=None, mock=False):
-    """Return {text, language, model, seconds} using the Groq STT endpoint."""
+    """Return {text, language, model, seconds} using the configured provider."""
     rules = rules or load_rules()
-    stt = rules["stt"]
-    lang = language or stt.get("language", "es")
+    provider = provider_config(rules["stt"])
+    lang = language or provider["language"]
     if mock:
         return {"text": "mock transcription", "language": lang,
                 "model": "mock", "seconds": wav_seconds(path)}
+    if provider["name"] == "cloudflare":
+        return _transcribe_cloudflare(path, provider, hint)
+    return _transcribe_groq(path, provider, lang, hint)
+
+
+def _read_audio(path):
+    payload = pathlib.Path(path).read_bytes()
+    if len(payload) > 25 * 1024 * 1024:
+        raise RuntimeError("audio exceeds the 25 MB upload limit")
+    return payload
+
+
+def _transcribe_groq(path, provider, lang, hint):
     key = api_key()
     if not key:
         raise RuntimeError("GROQ_API_KEY is not set (or VOICE_KEY_FILE is missing)")
-    payload = pathlib.Path(path).read_bytes()
-    if len(payload) > 25 * 1024 * 1024:
-        raise RuntimeError("audio exceeds the 25 MB free-tier upload limit")
     body, content_type = _multipart(path, {
-        "model": stt.get("model", "whisper-large-v3-turbo"),
+        "model": provider["model"],
         "language": lang,
-        "prompt": hint if hint is not None else stt.get("hint", ""),
+        "prompt": hint if hint is not None else provider["hint"],
     })
     request = urllib.request.Request(
-        stt.get("endpoint", "https://api.groq.com/openai/v1/audio/transcriptions"),
-        data=body,
+        provider["endpoint"], data=body,
         headers={"Authorization": f"Bearer {key}", "Content-Type": content_type},
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=int(stt.get("timeout", 30))) as response:
+        with urllib.request.urlopen(request, timeout=provider["timeout"]) as response:
             result = json.load(response)
     except urllib.error.HTTPError as exc:
         retry = exc.headers.get("retry-after", "?") if exc.headers else "?"
         raise RuntimeError(f"Groq HTTP {exc.code} (retry-after: {retry}s)") from exc
     return {"text": (result.get("text") or "").strip(), "language": lang,
-            "model": stt.get("model", ""), "seconds": wav_seconds(path)}
+            "model": provider["model"], "seconds": wav_seconds(path)}
+
+
+def _transcribe_cloudflare(path, provider, hint):
+    # Cloudflare Whisper takes raw audio and auto-detects the language; the
+    # vocabulary hint is a Groq-only feature and is intentionally ignored.
+    del hint
+    token, account = cloudflare_credentials()
+    if not token or not account:
+        raise RuntimeError(
+            "Cloudflare credentials missing: CLOUDFLARE_API_TOKEN / CF_ACCOUNT_ID "
+            "or ~/.config/voice-bridge/{cf_token,cf_account}")
+    endpoint = provider["endpoint"].format(account_id=account, model=provider["model"])
+    request = urllib.request.Request(
+        endpoint, data=_read_audio(path),
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "audio/wav"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=provider["timeout"]) as response:
+            result = json.load(response)
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"Cloudflare HTTP {exc.code}: {exc.reason}") from exc
+    if result.get("success") is False:
+        detail = ", ".join(str(item.get("message", item))
+                           for item in result.get("errors", []))
+        raise RuntimeError(f"Cloudflare Workers AI error: {detail or 'unknown'}")
+    return {"text": (result.get("result", {}).get("text") or "").strip(),
+            "language": provider["language"], "model": provider["model"],
+            "seconds": wav_seconds(path)}
 
 
 def _comm(pid):
@@ -270,11 +346,14 @@ def last(rules=None):
 def status(rules=None):
     rules = rules or load_rules()
     state = state_dir(rules)
+    provider = provider_config(rules["stt"])
     return {"state": str(state), "recording": (state / "recording.pid").exists(),
+            "provider": provider["name"],
+            "credential_ready": credential_ready(rules),
             "key_ready": key_ready(),
             "last": last(rules)[:200],
-            "model": rules["stt"].get("model", ""),
-            "language": rules["stt"].get("language", "es"),
+            "model": provider["model"],
+            "language": provider["language"],
             "deliver": rules["deliver"].get("backend", "none")}
 
 

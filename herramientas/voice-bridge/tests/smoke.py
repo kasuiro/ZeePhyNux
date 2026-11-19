@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Offline smoke tests for voice-bridge. No network, no microphone, no vault."""
+import copy
 import io
 import json
 import pathlib
@@ -38,17 +39,21 @@ class VoiceBridgeSmoke(unittest.TestCase):
             out.writeframes(b"\x00\x00" * 16000)
 
     def test_rules_defaults(self):
-        self.assertEqual(self.rules["stt"]["model"], "whisper-large-v3-turbo")
+        self.assertEqual(self.rules["stt"]["provider"], "cloudflare")
+        self.assertEqual(self.rules["stt"]["providers"]["cloudflare"]["model"],
+                         "@cf/openai/whisper")
         self.assertEqual(self.rules["stt"]["language"], "es")
         self.assertEqual(self.rules["deliver"]["backend"], "none")
 
     def test_no_key_by_default(self):
+        rules = copy.deepcopy(self.rules)
+        rules["stt"]["provider"] = "groq"
         missing = pathlib.Path(self.tmp.name) / "no-key"
         with mock.patch.dict("os.environ", {}, clear=True), \
                 mock.patch.object(voicectl, "DEFAULT_KEY_FILE", missing):
             self.assertFalse(voicectl.key_ready())
             with self.assertRaises(RuntimeError):
-                voicectl.transcribe_file(self.wav, self.rules)
+                voicectl.transcribe_file(self.wav, rules)
 
     def test_key_from_default_file(self):
         key_file = pathlib.Path(self.tmp.name) / "key"
@@ -61,13 +66,14 @@ class VoiceBridgeSmoke(unittest.TestCase):
     def test_wav_duration(self):
         self.assertEqual(voicectl.wav_seconds(self.wav), 1.0)
 
-    def test_transcribe_request_and_response(self):
+    def test_groq_request_and_response(self):
+        rules = copy.deepcopy(self.rules)
+        rules["stt"]["provider"] = "groq"
         payload = json.dumps({"text": "  hola mundo  "}).encode()
         with mock.patch.dict("os.environ", {"GROQ_API_KEY": "unit-test-key"}):
             with mock.patch("urllib.request.urlopen",
                             return_value=FakeResponse(payload)) as request:
-                result = voicectl.transcribe_file(self.wav, self.rules,
-                                                  hint="zeep")
+                result = voicectl.transcribe_file(self.wav, rules, hint="zeep")
         self.assertEqual(result["text"], "hola mundo")
         self.assertEqual(result["seconds"], 1.0)
         args = request.call_args.args[0]
@@ -75,6 +81,42 @@ class VoiceBridgeSmoke(unittest.TestCase):
         body = args.data.decode("utf-8", "ignore")
         self.assertIn("whisper-large-v3-turbo", body)
         self.assertIn("zeep", body)
+
+    def test_cloudflare_request_and_response(self):
+        payload = json.dumps({"success": True,
+                              "result": {"text": "  hola nube  "}}).encode()
+        env = {"CLOUDFLARE_API_TOKEN": "cf-token", "CF_ACCOUNT_ID": "acct"}
+        with mock.patch.dict("os.environ", env):
+            with mock.patch("urllib.request.urlopen",
+                            return_value=FakeResponse(payload)) as request:
+                result = voicectl.transcribe_file(self.wav, self.rules)
+        self.assertEqual(result["text"], "hola nube")
+        self.assertEqual(result["model"], "@cf/openai/whisper")
+        args = request.call_args.args[0]
+        self.assertEqual(
+            args.full_url,
+            "https://api.cloudflare.com/client/v4/accounts/acct/ai/run/@cf/openai/whisper")
+        self.assertEqual(args.get_header("Authorization"), "Bearer cf-token")
+        self.assertEqual(args.data, self.wav.read_bytes())
+
+    def test_cloudflare_credentials_from_files(self):
+        token = pathlib.Path(self.tmp.name) / "cf_token"
+        account = pathlib.Path(self.tmp.name) / "cf_account"
+        token.write_text("cf-file-token\n", encoding="utf-8")
+        account.write_text("acct-file\n", encoding="utf-8")
+        with mock.patch.dict("os.environ", {}, clear=True), \
+                mock.patch.object(voicectl, "DEFAULT_CF_TOKEN_FILE", token), \
+                mock.patch.object(voicectl, "DEFAULT_CF_ACCOUNT_FILE", account):
+            self.assertEqual(voicectl.cloudflare_credentials(),
+                             ("cf-file-token", "acct-file"))
+
+    def test_cloudflare_missing_credentials(self):
+        missing = pathlib.Path(self.tmp.name) / "missing"
+        with mock.patch.dict("os.environ", {}, clear=True), \
+                mock.patch.object(voicectl, "DEFAULT_CF_TOKEN_FILE", missing), \
+                mock.patch.object(voicectl, "DEFAULT_CF_ACCOUNT_FILE", missing):
+            with self.assertRaises(RuntimeError):
+                voicectl.transcribe_file(self.wav, self.rules)
 
     def test_last_roundtrip(self):
         state = voicectl.state_dir(self.rules)
@@ -84,6 +126,7 @@ class VoiceBridgeSmoke(unittest.TestCase):
     def test_status(self):
         info = voicectl.status(self.rules)
         self.assertFalse(info["recording"])
+        self.assertEqual(info["provider"], "cloudflare")
         self.assertEqual(info["language"], "es")
         self.assertIn("state", info)
 

@@ -1,12 +1,20 @@
 # voice-bridge prototype defaults.
-# The API key is NEVER stored here: use GROQ_API_KEY or VOICE_KEY_FILE.
+# Credentials are NEVER stored here: env vars or 0600 files in
+# ~/.config/voice-bridge/{key,cf_token,cf_account}.
 
 [stt]
-model = "whisper-large-v3-turbo"
-endpoint = "https://api.groq.com/openai/v1/audio/transcriptions"
-language = "es"
+provider = "cloudflare"          # cloudflare | groq
+language = "es"                  # Cloudflare auto-detects; used for reporting
 timeout = 30
 hint = "OpenCode, Hyprland, Questline, linux zeep, PipeWire, MCP, voice-bridge, push to talk"
+
+[stt.providers.cloudflare]
+model = "@cf/openai/whisper"
+endpoint = "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/@cf/openai/whisper"
+
+[stt.providers.groq]
+model = "whisper-large-v3-turbo"
+endpoint = "https://api.groq.com/openai/v1/audio/transcriptions"
 
 [record]
 rate = 16000

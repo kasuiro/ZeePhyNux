@@ -6,8 +6,9 @@ Status: **prototype implemented** (2026-11-18). Owner: dev. Language: American E
 
 Let a user with limited mobility or vision dictate prompts to OpenCode without
 running a local speech model. Audio capture and transport are local; inference
-is delegated to Groq Whisper (open-weight model behind an OpenAI-compatible
-endpoint). The transcript becomes an ordinary user prompt.
+is delegated to a hosted Whisper provider — Cloudflare Workers AI by default
+(zero data retention), Groq as an alternative. The transcript becomes an
+ordinary user prompt.
 
 Audio replies (TTS) are deliberately deferred to the validation iteration.
 
@@ -15,24 +16,25 @@ Audio replies (TTS) are deliberately deferred to the validation iteration.
 
 | Topic | Decision |
 |---|---|
-| STT provider | **Groq** free tier; `whisper-large-v3-turbo` (`$0.04/audio hour`) |
+| STT provider | **Cloudflare Workers AI** `@cf/openai/whisper` (zero retention, `$0.000453/min`); Groq selectable in `rules.toml` |
 | Language | Spanish default (`language="es"`); multilingual via tool argument |
 | Capture | `pw-record --rate 16000 --channels 1 --format s16` |
 | Push-to-talk | `SUPER+ALT+SHIFT+V` press -> start, release -> stop (`{ release = true }`) |
 | Delivery | kitty Wayland PTY master, automatic fallback to `wl-copy` |
 | Agent access | local stdio MCP server `voice`: `listen`, `transcribe`, `last`, `languages` |
 | Fallback | `/voice` command injects `last.txt` through a shell block |
-| Secret | `GROQ_API_KEY` env / `VOICE_KEY_FILE`; never in `rules.toml` or logs |
-| Limits | 20 RPM, 7.2K audio-seconds/hour, 28.8K/day, 25 MB per upload |
+| Secret | `~/.config/voice-bridge/{cf_token,cf_account,key}` (0600) or env; never in `rules.toml` or logs |
+| Limits | Cloudflare: Worker AI free allocation; Groq: 20 RPM, 7.2K audio-seconds/hour, 28.8K/day, 25 MB/upload |
 
-Cloudflare Workers AI Whisper was considered (zero data retention) but not
-chosen; local Whisper/Vosk were discarded for lack of hardware headroom.
+Groq was the original provider, but its signup rejects `hotmail.com` domains
+(`signup_blocked`, including GitHub OAuth), so Cloudflare became the default
+on 2026-11-19. Local Whisper/Vosk remain discarded for lack of hardware headroom.
 
 ## 3. Architecture
 
 ```
 key down ─→ pw-record (16 kHz mono) ─→ capture.wav
-key up   ─→ Groq Whisper ─→ last.txt + last.json ─→ PTY master / clipboard ─→ OpenCode
+key up   ─→ hosted Whisper ─→ last.txt + last.json ─→ PTY master / clipboard ─→ OpenCode
                                   └─→ MCP voice_last / voice_listen ─→ agent context
 ```
 

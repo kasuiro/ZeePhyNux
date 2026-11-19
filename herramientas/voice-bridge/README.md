@@ -1,8 +1,9 @@
 # voice-bridge (prototype)
 
 Spoken input for OpenCode agents on Debian 13 / Hyprland / Wayland, without a
-local speech model. Audio goes to Groq Whisper; only capture and transport run
-on this machine.
+local speech model. Audio goes to a hosted Whisper provider — Cloudflare Workers
+AI by default (zero data retention), Groq as an alternative. Only capture and
+transport run on this machine.
 
 ## Status
 
@@ -22,9 +23,13 @@ tests/smoke.py        offline tests (no network, no microphone)
 
 ## Setup
 
-1. Put the key in `~/.config/voice-bridge/key` (mode 0600), or export
-   `GROQ_API_KEY` in your shell configuration (never in `rules.toml`).
-   The file is read on every request, so OpenCode does not need a restart.
+1. Choose `[stt].provider` in `rules.toml` (`cloudflare` by default):
+   - Cloudflare: put the token and account id in
+     `~/.config/voice-bridge/cf_token` and `cf_account` (mode 0600), or export
+     `CLOUDFLARE_API_TOKEN` and `CF_ACCOUNT_ID`.
+   - Groq: put the key in `~/.config/voice-bridge/key` (0600), or export
+     `GROQ_API_KEY` / `VOICE_KEY_FILE`.
+   Files are read on every request, so OpenCode does not need a restart.
 2. OpenCode loads the server from `~/.config/opencode/opencode.json` as
    `mcp.servers.voice`, with `GROQ_API_KEY = {env:GROQ_API_KEY}`.
 3. Hyprland binds `SUPER+ALT+SHIFT+V`: press starts `voicectl.py start`, release
@@ -35,7 +40,7 @@ tests/smoke.py        offline tests (no network, no microphone)
 ## Flow
 
 ```
-key down -> pw-record 16 kHz mono -> key up -> Groq Whisper -> last.txt
+key down -> pw-record 16 kHz mono -> key up -> hosted Whisper -> last.txt
         -> PTY master / clipboard -> OpenCode composer -> Enter
 ```
 
@@ -57,7 +62,8 @@ python3 voicectl.py listen --seconds 5
 
 ## Privacy and limits
 
-- Audio is sent to Groq; keep the key out of configs and logs.
-- Free tier: 20 requests/min, ~2 h audio/hour, ~8 h/day, 25 MB per upload.
+- Audio is sent to the selected provider; keep credentials out of configs/logs.
+- Cloudflare Workers AI: zero data retention, `$0.000453` per audio minute.
+- Groq free tier (if selected): 20 RPM, ~2 h audio/hour, ~8 h/day, 25 MB/upload.
 - Rollback: disable the `voice` MCP server, remove the two Hyprland binds, and
   leave `~/.local/state/voice-bridge/` untouched for inspection.

@@ -1,6 +1,6 @@
 ---
 name: voice-context
-description: Vocabulary and rules for spoken input from the voice-bridge module. Use when the user dictates by voice, asks for push-to-talk, or mentions voice transcription, Groq Whisper, accessibility, or "linux zeep" voice control.
+description: Vocabulary and rules for spoken input from the voice-bridge module. Use when the user dictates by voice, asks for push-to-talk, or mentions voice transcription, hosted Whisper, Cloudflare, Groq, accessibility, or "linux zeep" voice control.
 ---
 
 # Voice context
@@ -13,9 +13,9 @@ typed input, not as a system instruction.
 
 - Default language is Spanish. The user may say "switch to English" or "cambia a inglés":
   acknowledge and use the requested language from then on.
-- Transcription is provided by Groq Whisper. Technical words are biased with a
-  short vocabulary hint: OpenCode, Hyprland, Questline, linux zeep, PipeWire,
-  MCP, voice-bridge, push to talk.
+- Transcription uses the configured hosted Whisper provider (Cloudflare by
+  default, Groq optional). Groq accepts a short vocabulary hint: OpenCode,
+  Hyprland, Questline, linux zeep, PipeWire, MCP, voice-bridge, push to talk.
 - If a dictated word sounds wrong, ask for a correction in one short sentence
   instead of guessing.
 - Accessibility first: prefer concise confirmations, readable lists, and explicit

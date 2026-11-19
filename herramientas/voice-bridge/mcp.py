@@ -20,7 +20,7 @@ LANGUAGES = {
 TOOLS = [
     {
         "name": "listen",
-        "description": "Ask the user to speak, then transcribe with Groq Whisper. Returns text, language and duration.",
+        "description": "Ask the user to speak, then transcribe with the configured Whisper provider. Returns text, language and duration.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -65,7 +65,7 @@ def tool_listen(args):
         rules["stt"]["language"] = language
     result = voicectl.listen(seconds, rules)
     if not result.get("text"):
-        raise ValueError("empty transcription: check the microphone and GROQ_API_KEY")
+        raise ValueError("empty transcription: check the microphone and STT credentials")
     return result
 
 
