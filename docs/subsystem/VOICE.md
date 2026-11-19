@@ -67,6 +67,10 @@ python3 herramientas/voice-bridge/voicectl.py speak "Prueba de audio"
 luac -p ~/.config/hypr/UserConfigs/user_keybinds.lua
 ```
 
+Physical push-to-talk was validated on 2026-11-19: pressing and releasing
+`SUPER+ALT+SHIFT+V` produced a short `capture.wav`, wrote `last.json`, and left
+no `pw-record` process running.
+
 ## 6. Risks and rollback
 
 - The PTY backend assumes the focused window is kitty; otherwise clipboard is used.
