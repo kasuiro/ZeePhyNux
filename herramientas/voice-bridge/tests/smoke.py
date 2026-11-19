@@ -66,6 +66,11 @@ class VoiceBridgeSmoke(unittest.TestCase):
     def test_wav_duration(self):
         self.assertEqual(voicectl.wav_seconds(self.wav), 1.0)
 
+    def test_wav_duration_falls_back_to_size(self):
+        fake = pathlib.Path(self.tmp.name) / "unfinalised.wav"
+        fake.write_bytes(b"RIFF" + b"\x00" * 40 + b"\x00" * 32000)
+        self.assertEqual(voicectl.wav_seconds(fake), 1.0)
+
     def test_groq_request_and_response(self):
         rules = copy.deepcopy(self.rules)
         rules["stt"]["provider"] = "groq"

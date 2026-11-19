@@ -105,8 +105,16 @@ def wav_seconds(path):
         with wave.open(str(path), "rb") as handle:
             frames = handle.getnframes()
             rate = handle.getframerate() or 16000
-            return round(frames / rate, 2)
+            if frames:
+                return round(frames / rate, 2)
     except Exception:
+        pass
+    # pw-record may not have finalised the header when we read it. Fall back to
+    # the byte count for our fixed 16 kHz / mono / s16 capture format.
+    try:
+        size = pathlib.Path(path).stat().st_size
+        return round(max(0, size - 44) / (16000 * 2), 2)
+    except OSError:
         return 0.0
 
 
