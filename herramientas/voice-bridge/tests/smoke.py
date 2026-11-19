@@ -7,6 +7,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
+import urllib.error
 import wave
 from unittest import mock
 
@@ -260,6 +261,50 @@ class VoiceBridgeSmoke(unittest.TestCase):
             result = mcp.respond({"id": 5, "method": "tools/call",
                                   "params": {"name": "listen", "arguments": {}}})
         self.assertTrue(result["result"]["isError"])
+
+    @staticmethod
+    def _rate_limit():
+        return urllib.error.HTTPError(
+            "https://api.cloudflare.com", 429, "Too Many Requests",
+            {"Retry-After": "0"}, None)
+
+    def test_429_retries_then_succeeds(self):
+        payload = json.dumps({"success": True,
+                              "result": {"text": "  hola nube  "}}).encode()
+        env = {"CLOUDFLARE_API_TOKEN": "cf-token", "CF_ACCOUNT_ID": "acct"}
+        with mock.patch.dict("os.environ", env):
+            with mock.patch("voicectl.time.sleep"):
+                with mock.patch("urllib.request.urlopen",
+                                side_effect=[self._rate_limit(),
+                                             FakeResponse(payload)]) as request:
+                    result = voicectl.transcribe_file(self.wav, self.rules)
+        self.assertEqual(result["text"], "hola nube")
+        self.assertEqual(request.call_count, 2)
+
+    def test_429_exhausts_retries(self):
+        rules = copy.deepcopy(self.rules)
+        rules["api"]["retry_attempts"] = 1
+        env = {"CLOUDFLARE_API_TOKEN": "cf-token", "CF_ACCOUNT_ID": "acct"}
+        with mock.patch.dict("os.environ", env):
+            with mock.patch("voicectl.time.sleep"):
+                with mock.patch("urllib.request.urlopen",
+                                side_effect=[self._rate_limit(), self._rate_limit()]) as request:
+                    with self.assertRaises(RuntimeError) as caught:
+                        voicectl.transcribe_file(self.wav, rules)
+        self.assertIn("HTTP 429", str(caught.exception))
+        self.assertEqual(request.call_count, 2)
+
+    def test_bad_request_is_not_retried(self):
+        error = urllib.error.HTTPError("https://api.cloudflare.com", 400,
+                                       "Bad Request", {}, None)
+        env = {"CLOUDFLARE_API_TOKEN": "cf-token", "CF_ACCOUNT_ID": "acct"}
+        with mock.patch.dict("os.environ", env):
+            with mock.patch("voicectl.time.sleep"):
+                with mock.patch("urllib.request.urlopen", side_effect=error) as request:
+                    with self.assertRaises(RuntimeError) as caught:
+                        voicectl.transcribe_file(self.wav, self.rules)
+        self.assertIn("HTTP 400", str(caught.exception))
+        self.assertEqual(request.call_count, 1)
 
 
 if __name__ == "__main__":

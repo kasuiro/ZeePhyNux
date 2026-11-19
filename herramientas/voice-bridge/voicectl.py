@@ -48,6 +48,50 @@ def state_dir(rules):
     return path
 
 
+RETRYABLE_HTTP = frozenset({429, 500, 502, 503, 504})
+
+
+def retry_settings(rules=None):
+    """Bounded backoff for transient provider errors (429 and 5xx)."""
+    api = (rules or {}).get("api", {})
+    return (
+        max(0, int(api.get("retry_attempts", 3))),
+        max(0.1, float(api.get("retry_base_seconds", 2))),
+        max(1.0, float(api.get("retry_max_seconds", 8))),
+    )
+
+
+def _retry_delay(exc, attempt, base, cap):
+    header = exc.headers.get("Retry-After", "") if exc.headers else ""
+    try:
+        seconds = float(header)
+    except (TypeError, ValueError):
+        seconds = base * (2 ** attempt)
+    return max(0.0, min(seconds, cap))
+
+
+def http_post(request_factory, timeout, rules=None, label="API"):
+    """POST with backoff on rate limits, transient 5xx and network errors."""
+    attempts, base, cap = retry_settings(rules)
+    for attempt in range(attempts + 1):
+        try:
+            with urllib.request.urlopen(request_factory(), timeout=timeout) as response:
+                return response.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code not in RETRYABLE_HTTP or attempt >= attempts:
+                retry = exc.headers.get("Retry-After", "?") if exc.headers else "?"
+                raise RuntimeError(
+                    f"{label} HTTP {exc.code}: {exc.reason} (retry-after: {retry}s)"
+                ) from exc
+            delay = _retry_delay(exc, attempt, base, cap)
+        except urllib.error.URLError as exc:
+            if attempt >= attempts:
+                raise RuntimeError(f"{label} network error: {exc.reason}") from exc
+            delay = min(base * (2 ** attempt), cap)
+        time.sleep(delay)
+    raise RuntimeError(f"{label} request failed after {attempts + 1} attempts")
+
+
 def api_key():
     key = os.environ.get("GROQ_API_KEY", "").strip()
     if key:
@@ -171,8 +215,9 @@ def transcribe_file(path, rules=None, language=None, hint=None, mock=False):
                 "language": "es" if lang == "auto" else lang,
                 "model": "mock", "seconds": wav_seconds(path)}
     if provider["name"] == "cloudflare":
-        return _transcribe_cloudflare(path, provider, hint, lang)
-    return _transcribe_groq(path, provider, "es" if lang == "auto" else lang, hint)
+        return _transcribe_cloudflare(path, provider, hint, lang, rules)
+    return _transcribe_groq(path, provider, "es" if lang == "auto" else lang,
+                            hint, rules)
 
 
 def _read_audio(path):
@@ -182,7 +227,7 @@ def _read_audio(path):
     return payload
 
 
-def _transcribe_groq(path, provider, lang, hint):
+def _transcribe_groq(path, provider, lang, hint, rules=None):
     key = api_key()
     if not key:
         raise RuntimeError("GROQ_API_KEY is not set (or VOICE_KEY_FILE is missing)")
@@ -196,17 +241,13 @@ def _transcribe_groq(path, provider, lang, hint):
         headers={"Authorization": f"Bearer {key}", "Content-Type": content_type},
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(request, timeout=provider["timeout"]) as response:
-            result = json.load(response)
-    except urllib.error.HTTPError as exc:
-        retry = exc.headers.get("retry-after", "?") if exc.headers else "?"
-        raise RuntimeError(f"Groq HTTP {exc.code} (retry-after: {retry}s)") from exc
+    raw = http_post(lambda: request, provider["timeout"], rules, "Groq STT")
+    result = json.loads(raw)
     return {"text": (result.get("text") or "").strip(), "language": lang,
             "model": provider["model"], "seconds": wav_seconds(path)}
 
 
-def _transcribe_cloudflare(path, provider, hint, lang="es"):
+def _transcribe_cloudflare(path, provider, hint, lang="es", rules=None):
     # Cloudflare Whisper takes raw audio and auto-detects the language; the
     # vocabulary hint is a Groq-only feature and is intentionally ignored.
     del hint
@@ -221,11 +262,8 @@ def _transcribe_cloudflare(path, provider, hint, lang="es"):
         headers={"Authorization": f"Bearer {token}", "Content-Type": "audio/wav"},
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(request, timeout=provider["timeout"]) as response:
-            result = json.load(response)
-    except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"Cloudflare HTTP {exc.code}: {exc.reason}") from exc
+    raw = http_post(lambda: request, provider["timeout"], rules, "Cloudflare STT")
+    result = json.loads(raw)
     if result.get("success") is False:
         detail = ", ".join(str(item.get("message", item))
                            for item in result.get("errors", []))
@@ -426,11 +464,8 @@ def speak(text, rules=None, language=None, play=True):
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(request, timeout=int(tts.get("timeout", 30))) as response:
-            audio = response.read()
-    except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"Cloudflare TTS HTTP {exc.code}: {exc.reason}") from exc
+    audio = http_post(lambda: request, int(tts.get("timeout", 30)), rules,
+                      "Cloudflare TTS")
     if not audio:
         raise RuntimeError("Cloudflare TTS returned no audio")
     path = state_dir(rules) / "reply.mp3"

@@ -2,6 +2,13 @@
 # Credentials are NEVER stored here: env vars or 0600 files in
 # ~/.config/voice-bridge/{key,cf_token,cf_account}.
 
+[api]
+# Transient upstream errors: 429/5xx and network failures are retried with
+# exponential backoff. Retry-After from the provider is honoured, capped below.
+retry_attempts = 3
+retry_base_seconds = 2
+retry_max_seconds = 8
+
 [stt]
 provider = "cloudflare"          # cloudflare | groq
 language = "auto"                # Cloudflare detects es/en from the audio

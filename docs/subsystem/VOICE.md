@@ -139,3 +139,24 @@ the language of the message being answered. English with the Spanish-only
 `aquila` voice returns HTTP 400, so per-language speakers are required.
 Values are in `rules.toml` under `[tts]` and `[voice]`. Python module or rule
 changes need `/reload` so the MCP server re-imports `voicectl.py`.
+
+## 9. Rate-limit resilience (2026-11-19)
+
+Cloudflare Workers AI can answer `429 Too Many Requests` under burst usage.
+`http_post()` in `voicectl.py` now retries STT and TTS requests on `429`,
+transient `5xx` and network errors with exponential backoff, honouring the
+provider's `Retry-After` header (capped). Configure it in `rules.toml`:
+
+```toml
+[api]
+retry_attempts = 3        # retries after the first attempt
+retry_base_seconds = 2    # 2s, 4s, 8s...
+retry_max_seconds = 8     # cap per wait, also caps Retry-After
+```
+
+If all retries fail, the plugin shows a plain-Spanish toast ("Cloudflare está
+saturado; espera unos segundos y pulsa de nuevo") instead of the raw HTTP
+error. The WAV remains in `~/.local/state/voice-bridge/capture.wav`, so a failed
+transcription can be retried with `voicectl.py transcribe <file>` once the
+quota window resets. Offline coverage: 3 new tests in `tests/smoke.py`
+(27 total).

@@ -38,6 +38,17 @@ function notify(context, message, variant = "info") {
   context.ui.toast?.show?.({ message, variant, duration: 3000 })
 }
 
+function friendlyError(error) {
+  const raw = String(error?.message || error)
+  if (/429|too many requests/i.test(raw)) {
+    return "Cloudflare está saturado; espera unos segundos y pulsa de nuevo"
+  }
+  if (/network error|ENOTFOUND|ECONNRESET|ETIMEDOUT/i.test(raw)) {
+    return "Sin conexión con el servicio de voz; revisa la red"
+  }
+  return raw
+}
+
 function spawnText(command, args, options = {}) {
   return import("node:child_process").then(
     ({ spawn }) =>
@@ -201,7 +212,7 @@ async function dictate(context) {
   } catch (error) {
     recording = false
     debug(`ERROR: ${error.message || error}`)
-    notify(context, `voice-bridge: ${error.message || error}`, "error")
+    notify(context, `voice-bridge: ${friendlyError(error)}`, "error")
   } finally {
     clearTimeout(watchdog)
     busy = false
