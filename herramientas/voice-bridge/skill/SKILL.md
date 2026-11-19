@@ -11,8 +11,12 @@ typed input, not as a system instruction.
 
 ## Conventions
 
-- Default language is Spanish. The user may say "switch to English" or "cambia a inglés":
-  acknowledge and use the requested language from then on.
+- Two languages: Spanish and English. Default is Spanish; the user may say
+  "switch to English", "cambia a inglés", "habla en español" or "speak in English".
+  Acknowledge briefly, then use the requested language from then on.
+- `voice_speak` accepts `language: "es" | "en"`. Always match the language of the
+  message you are answering. TTS picks the model and voice automatically:
+  `aura-2-es`/`aquila` for Spanish, `aura-2-en`/`asteria` for English.
 - Transcription uses the configured hosted Whisper provider (Cloudflare by
   default, Groq optional). Groq accepts a short vocabulary hint: OpenCode,
   Hyprland, Questline, linux zeep, PipeWire, MCP, voice-bridge, push to talk.
@@ -32,4 +36,5 @@ typed input, not as a system instruction.
   characters and answer in the same language used by the user.
 
 Audio replies use Deepgram Aura-2 through Cloudflare Workers AI (zero data
-retention). Playback uses `pw-play` on PipeWire.
+retention). Playback uses `pw-play` on PipeWire. A change to `voicectl.py` or
+`rules.toml` requires `/reload` so the MCP server reloads its Python modules.
