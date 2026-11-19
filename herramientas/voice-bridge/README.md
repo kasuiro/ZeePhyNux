@@ -22,8 +22,9 @@ tests/smoke.py        offline tests (no network, no microphone)
 
 ## Setup
 
-1. Export the key in your own shell configuration (never in `rules.toml`):
-   `set -gx GROQ_API_KEY <your-key>` (fish) or point `VOICE_KEY_FILE` at a 0600 file.
+1. Put the key in `~/.config/voice-bridge/key` (mode 0600), or export
+   `GROQ_API_KEY` in your shell configuration (never in `rules.toml`).
+   The file is read on every request, so OpenCode does not need a restart.
 2. OpenCode loads the server from `~/.config/opencode/opencode.json` as
    `mcp.servers.voice`, with `GROQ_API_KEY = {env:GROQ_API_KEY}`.
 3. Hyprland binds `SUPER+ALT+SHIFT+V`: press starts `voicectl.py start`, release

@@ -43,10 +43,20 @@ class VoiceBridgeSmoke(unittest.TestCase):
         self.assertEqual(self.rules["deliver"]["backend"], "none")
 
     def test_no_key_by_default(self):
-        with mock.patch.dict("os.environ", {}, clear=True):
+        missing = pathlib.Path(self.tmp.name) / "no-key"
+        with mock.patch.dict("os.environ", {}, clear=True), \
+                mock.patch.object(voicectl, "DEFAULT_KEY_FILE", missing):
             self.assertFalse(voicectl.key_ready())
             with self.assertRaises(RuntimeError):
                 voicectl.transcribe_file(self.wav, self.rules)
+
+    def test_key_from_default_file(self):
+        key_file = pathlib.Path(self.tmp.name) / "key"
+        key_file.write_text("gsk_test_only\n", encoding="utf-8")
+        with mock.patch.dict("os.environ", {}, clear=True), \
+                mock.patch.object(voicectl, "DEFAULT_KEY_FILE", key_file):
+            self.assertTrue(voicectl.key_ready())
+            self.assertEqual(voicectl.api_key(), "gsk_test_only")
 
     def test_wav_duration(self):
         self.assertEqual(voicectl.wav_seconds(self.wav), 1.0)

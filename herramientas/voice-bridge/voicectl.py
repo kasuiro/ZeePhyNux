@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """voice-bridge control CLI: capture, transcribe and deliver spoken input.
 
-Zero third-party dependencies. The API key is read from GROQ_API_KEY or from
-the file named by VOICE_KEY_FILE; it is never written to disk by this module.
+Zero third-party dependencies. The API key is read from GROQ_API_KEY, from the
+file named by VOICE_KEY_FILE, or from ~/.config/voice-bridge/key (0600); this
+module never writes the key to disk.
 
     voicectl.py start          # push-to-talk key down
     voicectl.py stop           # key up: transcribe + deliver
@@ -25,6 +26,7 @@ import wave
 
 ROOT = pathlib.Path(__file__).resolve().parent
 DEFAULT_RULES = ROOT / "rules.toml"
+DEFAULT_KEY_FILE = pathlib.Path.home() / ".config/voice-bridge/key"
 
 
 def load_rules(path=DEFAULT_RULES):
@@ -50,6 +52,9 @@ def api_key():
         path = pathlib.Path(key_file).expanduser()
         if path.is_file():
             return path.read_text(encoding="utf-8").strip()
+    path = pathlib.Path(DEFAULT_KEY_FILE).expanduser()
+    if path.is_file():
+        return path.read_text(encoding="utf-8").strip()
     return ""
 
 
