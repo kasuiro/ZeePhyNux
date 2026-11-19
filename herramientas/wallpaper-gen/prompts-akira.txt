@@ -1,0 +1,11 @@
+# Stills para 12-Akira (retro anime, tema hoy vacio)
+# Formato:  <nombre> :: <prompt>
+# Se generan con:  GalleryGen.py --prompts prompts-akira.txt --sin-contexto \
+#                    --estilo "<ver README>" --steps 8 --out-dir /tmp/opencode/wall
+# El recorte a 16:9 se come el 44 % vertical, de ahi "horizon centered".
+
+01-neon-avenue-rain :: a wide shot down a neon-lit avenue in heavy rain at night, wet asphalt reflecting magenta and cyan signs, silhouetted pedestrians with umbrellas, horizon centered
+02-highway-overpass :: a wide shot from a highway overpass looking along the city, sodium streetlights receding into the distance, skyline on the horizon, low camera, horizon centered
+03-rooftop-skyline :: a rooftop in the foreground with air-conditioning units and antennas, a dense city skyline at dawn behind it, horizon centered
+04-train-crossing-dusk :: a level crossing at dusk, red signal lights, a commuter train stopped, power lines crossing the orange sky, horizon centered
+05-canal-reflections :: an industrial canal at night with concrete embankments, neon signs reflected in still water, a small boat moored, horizon centered

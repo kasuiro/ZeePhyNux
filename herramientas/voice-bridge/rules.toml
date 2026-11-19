@@ -1,0 +1,25 @@
+# voice-bridge prototype defaults.
+# The API key is NEVER stored here: use GROQ_API_KEY or VOICE_KEY_FILE.
+
+[stt]
+model = "whisper-large-v3-turbo"
+endpoint = "https://api.groq.com/openai/v1/audio/transcriptions"
+language = "es"
+timeout = 30
+hint = "OpenCode, Hyprland, Questline, linux zeep, PipeWire, MCP, voice-bridge, push to talk"
+
+[record]
+rate = 16000
+channels = 1
+format = "s16"
+max_seconds = 60
+
+[deliver]
+# tty    -> type the transcript into the focused kitty window (Wayland-native)
+# clipboard -> copy to the clipboard only; the user pastes it
+# none   -> keep the transcript in last.txt only
+backend = "tty"
+suffix = "\r"
+
+[paths]
+state = "/home/dev/.local/state/voice-bridge"

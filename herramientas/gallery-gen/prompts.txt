@@ -1,0 +1,36 @@
+# Lote 2 — 2026-11-18
+# Formato:  <nombre> :: <prompt>
+#
+# El NOMBRE decide categoría (prefijo), archivo y contexto de estilo.
+# El PROMPT solo describe el sujeto: el estilo, el encuadre y el fondo los añade
+# GalleryGen.py (BASE + CONTEXTOS) justo antes de llamar a la API.
+# Regla de contenido: se describe, no se nombra ninguna obra ni personaje con derechos.
+
+# --- stickers ---------------------------------------------------------------
+sticker-shield-and-sword :: a round wooden shield with an iron boss and a short sword crossed behind it, front view, warm browns and iron grey
+sticker-slime-blob :: a cheerful blue slime blob with two round eyes and a glossy highlight, sitting, wide at the bottom
+sticker-torch-flame :: a handheld wooden torch with a bright orange flame and a few floating embers, slightly tilted
+sticker-potion-bottle :: a round glass bottle filled with green potion, cork and red wax seal, small bubbles inside
+
+# --- meme -------------------------------------------------------------------
+meme-skeleton-waiting :: a small skeleton sitting on a plain bench, hunched shoulders, hands on its knees, deadpan stare
+meme-cat-typing :: a grey cat with both paws on a tiny keyboard, intense wide-eyed stare, ears back
+
+# --- gifts ------------------------------------------------------------------
+gift-wrapped-box-ribbon :: a small wrapped present seen from above at an angle, wide ribbon and a big bow, two paper colors
+gift-basket-fruit :: a woven basket holding three round fruits and a sprig of leaves, side view
+
+# --- personaje --------------------------------------------------------------
+personaje-cartographer :: a young cartographer holding a rolled map under one arm and a brass compass in the other hand, travel satchel, worn coat
+personaje-blacksmith :: a stocky blacksmith with a leather apron, raised hammer, soot smudges on the face, short braided beard
+personaje-sky-pirate :: a sky pirate with goggles pushed up on the forehead, long scarf caught in the wind, leather coat
+
+# --- series -----------------------------------------------------------------
+series-detective-badge :: a worn brass detective badge lying on a desk with a magnifying glass resting on it and a folded note
+series-spaceship-emblem :: a circular emblem with a small rocket in the centre and three stars arranged around it
+series-mystery-manor :: a tall manor silhouette on a hill, one window lit, a bare tree beside it, night sky
+
+# --- juegos -----------------------------------------------------------------
+juegos-arcade-cabinet :: a small arcade cabinet with a lit screen, two joysticks and three buttons, side angle
+juegos-space-invader :: a blocky alien invader with two antennae and six legs, symmetric, front view
+juegos-dungeon-key :: an ornate skeleton key with a red gem set in the bow and a cross-shaped bit

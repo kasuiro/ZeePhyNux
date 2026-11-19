@@ -1,0 +1,44 @@
+# Questline rules — edit by hand; every value is read on each run.
+# Docs: docs/subsystem/SPEC.md · Invariants: docs/subsystem/RULES.md
+
+[points]
+per_10_minutes   = 1     # fragments per completed 10 minutes in a mode
+daily_cap_per_mode = 40  # a mode cannot earn more than this per day (anti-AFK)
+max_session_minutes = 240  # a single session is credited at most 4 h
+task_done        = 10    # closing a vault task
+streak_min_minutes = 60  # a day counts for the streak with this much mode time
+streak_day_bonus = 5     # fragments per day of current streak
+streak_7_bonus   = 25    # extra when the streak reaches 7 days
+
+[roles]
+cooldown_days = 7
+bonus = 0.25             # +25% on the affinity modes of the active role
+
+[roles.affinity]
+apprentice  = ["readmode"]
+artisan     = ["devmode", "writemode"]
+scout       = ["planingmode"]
+director    = ["audiovisualmode"]
+illustrator = ["3dmode"]
+bard        = ["gamedevmode"]
+
+[hud]
+# Meta diaria de fragmentos que pinta la barra del escritorio.
+day_goal = 60
+streak_goal = 7
+tasks_on_card = 3
+
+[milestones]
+# Un hito se registra una vez y lanza el splash (F9.5c).
+chain_tasks = 5          # tareas del mismo proyecto dentro de una sesion de modo
+project_min_tasks = 10   # un proyecto solo celebra el 100% con estas tareas
+streak_days = [7, 14, 30]
+perfect_week_days = 7    # dias calificados seguidos
+
+[emblems]
+# Emblema pixel-art por proyecto (F9.6). Generacion remota, nunca local.
+size = 512
+ink = "#12100E"          # color 1: tinta
+accent = "#E0B45C"       # color 2: dorado
+min_size = 128
+max_size = 1024

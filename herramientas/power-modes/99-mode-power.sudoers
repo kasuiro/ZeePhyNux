@@ -1,0 +1,12 @@
+# Perfil energético para los modos de gamemode.
+# Instalar en: /etc/sudoers.d/99-mode-power   (root:root, 0440)
+# Comprobar con:  visudo -c
+#
+# Se autorizan los verbos de escritura, con su argumento exacto.
+# "status" no aparece porque no necesita root (y a propósito no lo tiene).
+# No hay comodines: sudo compara la línea de comandos completa.
+
+dev ALL=(root) NOPASSWD: /usr/local/bin/mode-power perf, \
+                          /usr/local/bin/mode-power balanced, \
+                          /usr/local/bin/mode-power eco, \
+                          /usr/local/bin/mode-power restore

@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.log
+recordings/
+.DS_Store
+.obsidian/workspace.json

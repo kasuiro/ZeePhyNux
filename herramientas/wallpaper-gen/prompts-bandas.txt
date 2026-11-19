@@ -1,0 +1,5 @@
+# Stills para los 2 reemplazos de 10-bandas
+# Mismo comando que prompts-akira.txt, con el estilo de concierto abstracto.
+
+acid-bath-crt :: a wall of old CRT monitors showing distorted signal bars, acid green and violet interference, scanlines, dark room, horizon centered
+system-of-a-down-caotico :: an abstract dark collage of torn metal shards and red light streaks, high contrast, chaotic composition, no figures, horizon centered
