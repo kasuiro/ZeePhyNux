@@ -262,8 +262,13 @@ def _write_pty(text, rules):
 
 
 def deliver(text, rules):
-    """Return the backend actually used."""
-    backend = rules.get("deliver", {}).get("backend", "none")
+    """Return the backend actually used.
+
+    VOICE_DELIVER_BACKEND overrides the configured backend so callers such as
+    the TUI plugin can own the delivery path without typing into the PTY.
+    """
+    backend = os.environ.get("VOICE_DELIVER_BACKEND") or \
+        rules.get("deliver", {}).get("backend", "none")
     if not text or backend == "none":
         return backend
     if backend == "tty":
@@ -358,6 +363,7 @@ def speak(text, rules=None, language=None, play=True):
     if not content:
         raise ValueError("text is required")
     tts = rules.get("tts", {})
+    voice = rules.get("voice", {})
     limit = int(tts.get("max_chars", 2000))
     if len(content) > limit:
         raise ValueError(f"text too long ({len(content)} > {limit} characters)")
@@ -375,7 +381,7 @@ def speak(text, rules=None, language=None, play=True):
     ).format(account_id=account, model=model)
     body = json.dumps({
         "text": content,
-        "speaker": tts.get("speaker", "aquila"),
+        "speaker": voice.get("speaker", tts.get("speaker", "aquila")),
         "encoding": tts.get("encoding", "mp3"),
     }).encode("utf-8")
     request = urllib.request.Request(
@@ -392,6 +398,18 @@ def speak(text, rules=None, language=None, play=True):
         raise RuntimeError("Cloudflare TTS returned no audio")
     path = state_dir(rules) / "reply.mp3"
     path.write_bytes(audio)
+    rate = float(voice.get("rate", 1.0))
+    if not 0.5 <= rate <= 2.0:
+        raise ValueError("voice.rate must be between 0.5 and 2.0")
+    if rate != 1.0:
+        adjusted = path.with_suffix(".rate.mp3")
+        subprocess.run(
+            [voice.get("ffmpeg", "ffmpeg"), "-y", "-loglevel", "error",
+             "-i", str(path), "-filter:a", f"atempo={rate}", str(adjusted)],
+            check=True, capture_output=True, timeout=60,
+        )
+        adjusted.replace(path)
+        audio = path.read_bytes()
     played = False
     if play:
         player = tts.get("player", "pw-play")
@@ -402,7 +420,9 @@ def speak(text, rules=None, language=None, play=True):
         except (OSError, subprocess.SubprocessError) as exc:
             notify(f"voice-bridge: audio saved but playback failed: {exc}")
     return {"text": content[:200], "language": lang, "model": model,
-            "path": str(path), "bytes": len(audio), "played": played}
+            "speaker": voice.get("speaker", tts.get("speaker", "aquila")),
+            "rate": rate, "path": str(path), "bytes": len(audio),
+            "played": played}
 
 
 def status(rules=None):

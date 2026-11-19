@@ -37,12 +37,18 @@ tests/smoke.py        offline tests (no network, no microphone)
    runs `voicectl.py stop`. The transcript is typed into the focused kitty
    window via its Wayland PTY (`deliver.backend = "tty"`), with clipboard as
    automatic fallback.
+ 4. The local TUI plugin (`plugin/tui.js`) is registered in `cli.json`. Inside
+    OpenCode, `Ctrl+Alt+V` starts recording; press again to transcribe, copy to
+    the clipboard, paste into the composer and speak "Entendido". It sets
+    `VOICE_DELIVER_BACKEND=none` so the Python CLI never types into the PTY.
 
 ## Flow
 
 ```
 key down -> pw-record 16 kHz mono -> key up -> hosted Whisper -> last.txt
         -> PTY master / clipboard -> OpenCode composer -> Enter
+
+TUI:  Ctrl+Alt+V -> start -> Ctrl+Alt+V -> stop -> clipboard -> prompt.paste
 ```
 
 The agent can also initiate a conversation turn with `voice_listen(seconds: 8)`.
@@ -60,7 +66,11 @@ python3 tests/smoke.py
 python3 voicectl.py status
 python3 voicectl.py listen --seconds 5
 python3 voicectl.py speak "Prueba de audio"
+node --check --input-type=module < plugin/tui.js
 ```
+
+Playback preferences live in `[voice]` of `rules.toml`: `speaker` selects the
+Deepgram Aura-2 voice and `rate` (0.5–2.0) is applied locally with `ffmpeg atempo`.
 
 ## Privacy and limits
 
@@ -68,5 +78,6 @@ python3 voicectl.py speak "Prueba de audio"
 - Cloudflare Workers AI: zero data retention, `$0.000453` per audio minute.
 - Groq free tier (if selected): 20 RPM, ~2 h audio/hour, ~8 h/day, 25 MB/upload.
 - TTS: Deepgram Aura-2 (`$0.03/1k chars`), MP3 saved to `reply.mp3` in state dir.
-- Rollback: disable the `voice` MCP server, remove the two Hyprland binds, and
-  leave `~/.local/state/voice-bridge/` untouched for inspection.
+- Rollback: disable the `voice` MCP server, remove the two Hyprland binds, drop
+  the plugin entry from `cli.json` (backup: `cli.json.bak-20261119-voice-tui`),
+  and leave `~/.local/state/voice-bridge/` untouched for inspection.

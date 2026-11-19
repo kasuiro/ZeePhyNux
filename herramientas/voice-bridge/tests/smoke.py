@@ -166,6 +166,35 @@ class VoiceBridgeSmoke(unittest.TestCase):
         self.assertFalse(result["played"])
         play.assert_not_called()
 
+    def test_voice_preferences(self):
+        rules = copy.deepcopy(self.rules)
+        rules["voice"] = {"speaker": "nova", "rate": 1.0}
+        env = {"CLOUDFLARE_API_TOKEN": "cf-token", "CF_ACCOUNT_ID": "acct"}
+        with mock.patch.dict("os.environ", env), \
+                mock.patch("urllib.request.urlopen",
+                           return_value=FakeResponse(b"ID3fake")) as request, \
+                mock.patch("subprocess.run"):
+            result = voicectl.speak("hola", rules, play=False)
+        body = json.loads(request.call_args.args[0].data)
+        self.assertEqual(body["speaker"], "nova")
+        self.assertEqual(result["speaker"], "nova")
+        self.assertEqual(result["rate"], 1.0)
+
+    def test_voice_rate_uses_ffmpeg(self):
+        rules = copy.deepcopy(self.rules)
+        rules["voice"] = {"speaker": "aquila", "rate": 1.2}
+        env = {"CLOUDFLARE_API_TOKEN": "cf-token", "CF_ACCOUNT_ID": "acct"}
+        def fake_ffmpeg(args, **_kwargs):
+            pathlib.Path(args[-1]).write_bytes(b"ID3adjusted")
+
+        with mock.patch.dict("os.environ", env), \
+                mock.patch("urllib.request.urlopen",
+                           return_value=FakeResponse(b"ID3fake")), \
+                mock.patch("subprocess.run", side_effect=fake_ffmpeg) as run:
+            result = voicectl.speak("hola", rules, play=False)
+        self.assertEqual(result["rate"], 1.2)
+        self.assertIn("atempo=1.2", run.call_args.args[0])
+
     def test_deliver_none(self):
         self.assertEqual(voicectl.deliver("hola", self.rules), "none")
 

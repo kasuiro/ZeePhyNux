@@ -26,6 +26,11 @@ timeout = 30
 max_chars = 2000
 player = "pw-play"
 
+[voice]
+# Per-user playback preference used by the TUI plugin confirmations.
+speaker = "aquila"               # Deepgram Aura-2 voice; falls back to [tts].speaker
+rate = 1.0                       # 0.5–2.0; applied locally with ffmpeg atempo
+
 [record]
 rate = 16000
 channels = 1

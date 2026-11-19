@@ -80,8 +80,21 @@ the modifier state is unchanged on key-up.
 - Rollback: disable `mcp.servers.voice`, remove the two binds, keep the state
   directory for inspection. Do not touch TimeShift or system configuration.
 
-## 7. Next iteration
+## 7. TUI plugin iteration (2026-11-19)
 
-Evaluate the advanced TUI plugin with an in-composer keybind, so dictation and
-audio confirmation stay inside OpenCode without relying on the focused kitty
-window. Also add a per-user voice preference (speaker and rate) in `rules.toml`.
+`plugin/tui.js` is a local CLI-only plugin registered in `cli.json`. `Ctrl+Alt+V`
+toggles dictation: first press calls `voicectl.py start`, second press calls
+`stop`, copies the transcript with `wl-copy`, dispatches `prompt.paste` and
+speaks "Entendido" through the configured TTS. It forces
+`VOICE_DELIVER_BACKEND=none` so the Python CLI does not type into the kitty PTY.
+
+The keystroke no longer depends on the Hyprland composer bind or on which window
+has focus. The Hyprland `SUPER+ALT+SHIFT+V` path stays available as fallback.
+
+Per-user playback preferences live in `[voice]` of `rules.toml`: `speaker`
+(Deepgram Aura-2 voice) and `rate` (0.5–2.0, applied with `ffmpeg atempo`).
+`VOICE_DELIVER_BACKEND` overrides the configured delivery backend for callers
+that own the composer path.
+
+Validation: 22/22 offline tests, `node --check` on the plugin. Pending: physical
+`Ctrl+Alt+V` check inside the running TUI.
