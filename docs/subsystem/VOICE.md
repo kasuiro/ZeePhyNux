@@ -67,9 +67,10 @@ python3 herramientas/voice-bridge/voicectl.py speak "Prueba de audio"
 luac -p ~/.config/hypr/UserConfigs/user_keybinds.lua
 ```
 
-Physical push-to-talk was validated on 2026-11-19: pressing and releasing
-`SUPER+ALT+SHIFT+V` produced a short `capture.wav`, wrote `last.json`, and left
-no `pw-record` process running.
+Physical push-to-talk was validated on 2026-11-19: a 19,05 s dictation produced
+a full transcript, wrote `last.json`, and left no `pw-record` running. Release
+`V` before the modifiers: Hyprland only fires the `{ release = true }` bind when
+the modifier state is unchanged on key-up.
 
 ## 6. Risks and rollback
 
