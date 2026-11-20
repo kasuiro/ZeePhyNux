@@ -1,0 +1,5 @@
+from: markdown
+to: docx
+standalone: true
+wrap: auto
+number-sections: true

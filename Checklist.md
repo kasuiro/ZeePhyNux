@@ -145,13 +145,14 @@
 - [x] Cloudflare TTS queda como fallback explicito (`[tts].provider = "cloudflare"`)
 - [ ] `ql-ffe4bea3`: activacion manos libres «oye, zeep»
 
-## F11 - Modulo documental (planeacion, tareas pendientes)
-- [ ] Aprobacion del administrador para cualquier cambio posterior
-- [ ] Investigacion A: PDF sin LibreOffice (ReportLab / WeasyPrint / Pandoc)
-- [ ] Investigacion B: DOCX (Pandoc frente a python-docx)
-- [ ] Investigacion C: XLSX y CSV (openpyxl + csv, sin Pandas)
-- [ ] Investigacion D: skills de OpenCode y skill `document-workflow`
-- [ ] Investigacion E: sistema de plantillas reutilizables
-- [ ] Disenar contratos de entrada/salida y directorio de entregables
-- [ ] Instalar dependencias aprobadas y ejecutar pruebas de humo
-- [ ] Implementar la skill y validar entregables reales
+## F11 - Modulo documental (fases 0-5 completadas)
+- [x] Aprobacion del administrador para fases 2-4 y fase 5 condicionada (2026-11-20)
+- [x] Investigacion A: PDF sin LibreOffice (ReportLab / WeasyPrint / Pandoc)
+- [x] Investigacion B: DOCX (Pandoc frente a python-docx)
+- [x] Investigacion C: XLSX y CSV (openpyxl + csv, sin Pandas)
+- [x] Investigacion D: skills de OpenCode y skill `document-workflow`
+- [x] Investigacion E: sistema de plantillas reutilizables
+- [x] Disenar contratos de entrada/salida y directorio de entregables por proyecto
+- [x] Instalar Pandoc 3.14 estatico y venv con ReportLab 5.1.0 / openpyxl 3.1.5 en `/home`
+- [x] Implementar skill y validar entregables sinteticos DOCX/PDF/CSV/XLSX
+- [x] Validacion del usuario con entregables de prueba (2026-11-20); pulido de diseno diferido

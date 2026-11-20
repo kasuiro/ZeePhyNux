@@ -1,0 +1,10 @@
+{
+  "source": "/home/dev/Documentos/Debian_Hyprland_Look_And_Feel/.opencode/skills/document-workflow/fixtures/sample.csv",
+  "source_sha256": "ef4110133a62739b66a0684c77b063be816f2eff1b23de9b433b44ebec150502",
+  "output": "sample.xlsx",
+  "format": "xlsx",
+  "tool": "openpyxl 3.1.5",
+  "title": "",
+  "template": "",
+  "created_utc": "2026-11-20T07:46:07+00:00"
+}

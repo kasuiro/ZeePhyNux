@@ -1,0 +1,16 @@
+title: string          # required for DOCX/PDF; derived from filename if absent
+author: string         # optional; empty string means "not supplied"
+date: string           # ISO-8601 preferred; optional
+lang: string           # es | en; default es
+template: string       # informe-tecnico | manual-procedimientos | none
+output: string         # optional explicit filename inside the project delivery dir
+source_format: string  # md | csv; inferred from --source
+formats:
+  - docx               # Pandoc 3.14
+  - pdf                # Pandoc HTML + ReportLab 5.1.0
+  - csv                # Python csv stdlib
+  - xlsx               # openpyxl 3.1.5
+rules:
+  source_immutable: true
+  no_overwrite_without_force: true
+  deliverables_inside_project: true

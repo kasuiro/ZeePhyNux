@@ -1,0 +1,10 @@
+{
+  "source": "/home/dev/Documentos/Debian_Hyprland_Look_And_Feel/.opencode/skills/document-workflow/fixtures/sample.md",
+  "source_sha256": "00875bb129ef4654d334e823b6055a8911a45d8c079daff550246879587cc383",
+  "output": "Entregable-de-prueba-sintético.docx",
+  "format": "docx",
+  "tool": "pandoc 3.14",
+  "title": "Entregable de prueba sintético",
+  "template": "informe-tecnico",
+  "created_utc": "2026-11-20T07:45:49+00:00"
+}
