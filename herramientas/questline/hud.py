@@ -29,6 +29,7 @@ STATE_DIR = Path(os.environ.get("QL_HOME", "~/.local/state/questline")).expandus
 HUD_FILE = STATE_DIR / "hud.json"
 RUNTIME = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
 PID_FILE = Path(RUNTIME) / "questline-hud.pid"
+POS_FILE = STATE_DIR / "hud-position.json"
 WIDTH = 300
 MARGIN_TOP = 44      # clear of waybar
 MARGIN_SIDE = 18
@@ -70,6 +71,25 @@ def load_hud() -> dict:
         return {}
 
 
+def load_pos() -> dict:
+    try:
+        raw = json.loads(POS_FILE.read_text())
+        return {
+            "right": max(0, int(raw.get("right", MARGIN_SIDE))),
+            "top": max(0, int(raw.get("top", MARGIN_TOP))),
+        }
+    except (OSError, ValueError, TypeError):
+        return {"right": MARGIN_SIDE, "top": MARGIN_TOP}
+
+
+def save_pos(pos: dict):
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        POS_FILE.write_text(json.dumps(pos))
+    except OSError:
+        pass
+
+
 class Hud:
     def __init__(self):
         self.data: dict = {}
@@ -79,6 +99,9 @@ class Hud:
         self.fullscreen = False    # an app is fullscreen on the focused monitor
         self.user_hidden = False   # toggled with SIGUSR1 / SUPER ALT SHIFT H
         self.current_output = ""
+        self.pos = load_pos()
+        self.dragging = False
+        self.drag_origin = (0, 0, 0, 0)
 
         win = Gtk.Window()
         self.win = win
@@ -93,8 +116,8 @@ class Hud:
         GtkLayerShell.set_layer(win, GtkLayerShell.Layer.TOP)
         GtkLayerShell.set_anchor(win, GtkLayerShell.Edge.TOP, True)
         GtkLayerShell.set_anchor(win, GtkLayerShell.Edge.RIGHT, True)
-        GtkLayerShell.set_margin(win, GtkLayerShell.Edge.TOP, MARGIN_TOP)
-        GtkLayerShell.set_margin(win, GtkLayerShell.Edge.RIGHT, MARGIN_SIDE)
+        GtkLayerShell.set_margin(win, GtkLayerShell.Edge.TOP, self.pos["top"])
+        GtkLayerShell.set_margin(win, GtkLayerShell.Edge.RIGHT, self.pos["right"])
         GtkLayerShell.set_keyboard_mode(win, GtkLayerShell.KeyboardMode.NONE)
         GtkLayerShell.set_exclusive_zone(win, 0)
 
@@ -106,6 +129,13 @@ class Hud:
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         box.get_style_context().add_class("hud")
+        box.set_tooltip_text("Arrastra para mover este panel")
+        box.set_events(Gdk.EventMask.BUTTON_PRESS_MASK |
+                       Gdk.EventMask.BUTTON_RELEASE_MASK |
+                       Gdk.EventMask.POINTER_MOTION_MASK)
+        box.connect("button-press-event", self.on_press)
+        box.connect("motion-notify-event", self.on_motion)
+        box.connect("button-release-event", self.on_release)
 
         self.headline = Gtk.Label(xalign=0)
         self.headline.get_style_context().add_class("headline")
@@ -211,6 +241,31 @@ class Hud:
         focused = next((m.get("name") for m in monitors if m.get("focused")), "")
         if focused and focused != self.current_output:
             self.follow_monitor(focused)
+        return True
+
+    # ------------------------------------------------------------------ drag
+    def on_press(self, widget, event):
+        self.dragging = True
+        self.drag_origin = (event.x_root, event.y_root,
+                            self.pos["right"], self.pos["top"])
+        return True
+
+    def on_motion(self, widget, event):
+        if not self.dragging:
+            return False
+        x0, y0, right0, top0 = self.drag_origin
+        self.pos["right"] = max(0, int(right0 - (event.x_root - x0)))
+        self.pos["top"] = max(0, int(top0 + event.y_root - y0))
+        GtkLayerShell.set_margin(self.win, GtkLayerShell.Edge.RIGHT,
+                                 self.pos["right"])
+        GtkLayerShell.set_margin(self.win, GtkLayerShell.Edge.TOP,
+                                 self.pos["top"])
+        return True
+
+    def on_release(self, widget, event):
+        if self.dragging:
+            self.dragging = False
+            save_pos(self.pos)
         return True
 
     def apply_visibility(self, force: bool = False):
