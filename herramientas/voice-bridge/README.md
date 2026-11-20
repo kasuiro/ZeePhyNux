@@ -1,83 +1,210 @@
-# voice-bridge (prototype)
+# voice-bridge
 
-Spoken input for OpenCode agents on Debian 13 / Hyprland / Wayland, without a
-local speech model. Audio goes to a hosted Whisper provider — Cloudflare Workers
-AI by default (zero data retention), Groq as an alternative. Only capture and
-transport run on this machine.
+Accesibilidad por voz para los agentes de OpenCode en Debian 13 / Hyprland /
+Wayland. **Todo el circuito de voz es local por defecto**: `faster-whisper`
+(modelo `base`, int8) convierte el WAV en texto y Piper sintetiza las respuestas;
+cada uno corre en su propio venv dentro de `~/.local/state/voice-bridge/`.
+No hay cupo de tokens ni credenciales para dictar ni para hablar.
 
-## Status
+Vosk en Docker sigue disponible como alternativa local, y los proveedores en la
+nube (Cloudflare, Groq) como opción explícita, pero ya no son el camino principal.
 
-Prototype validated: push-to-talk -> Spanish transcription -> prompt in OpenCode,
-plus audio replies via Deepgram Aura-2 on Cloudflare Workers AI.
-The advanced TUI plugin is the next iteration.
+## Estado
 
-## Layout
+- STT local Whisper `base` (es/en, detección automática) como proveedor default.
+- STT local Vosk (es/en) disponible con `[stt].provider = "vosk"`.
+- TTS local Piper `1.8.0` (es/en) como default; Cloudflare Aura-2 queda como fallback.
+- PTT `SUPER+ALT+SHIFT+V` y plugin TUI `Ctrl+Alt+V`.
+- 47 pruebas offline, sin red, micrófono ni credenciales.
 
-```
-rules.toml            defaults; never stores the API key
-voicectl.py           capture / transcribe / deliver CLI
-mcp.py                stdio MCP server: listen, transcribe, last, languages
-skill/SKILL.md        voice vocabulary and rules for the agent
-commands/voice.md     /voice fallback command
-tests/smoke.py        offline tests (no network, no microphone)
-```
-
-## Setup
-
-1. Choose `[stt].provider` in `rules.toml` (`cloudflare` by default):
-   - Cloudflare: put the token and account id in
-     `~/.config/voice-bridge/cf_token` and `cf_account` (mode 0600), or export
-     `CLOUDFLARE_API_TOKEN` and `CF_ACCOUNT_ID`.
-   - Groq: put the key in `~/.config/voice-bridge/key` (0600), or export
-     `GROQ_API_KEY` / `VOICE_KEY_FILE`.
-   Files are read on every request, so OpenCode does not need a restart.
-2. OpenCode loads the server from `~/.config/opencode/opencode.json` as
-   `mcp.servers.voice`, with `GROQ_API_KEY = {env:GROQ_API_KEY}`.
-3. Hyprland binds `SUPER+ALT+SHIFT+V`: press starts `voicectl.py start`, release
-   runs `voicectl.py stop`. The transcript is typed into the focused kitty
-   window via its Wayland PTY (`deliver.backend = "tty"`), with clipboard as
-   automatic fallback.
- 4. The local TUI plugin (`plugin/tui.js`) is registered in `cli.json`. Inside
-    OpenCode, `Ctrl+Alt+V` starts recording; press again to transcribe, copy to
-    the clipboard, paste into the composer and speak "Entendido". It sets
-    `VOICE_DELIVER_BACKEND=none` so the Python CLI never types into the PTY.
-
-## Flow
+## Estructura
 
 ```
-key down -> pw-record 16 kHz mono -> key up -> hosted Whisper -> last.txt
-        -> PTY master / clipboard -> OpenCode composer -> Enter
-
-TUI:  Ctrl+Alt+V -> start -> Ctrl+Alt+V -> stop -> clipboard -> prompt.paste
+rules.toml              defaults; nunca guarda credenciales
+voicectl.py             CLI: capture / transcribe / deliver / speak
+mcp.py                  servidor MCP stdio: listen, transcribe, last, languages, speak
+plugin/tui.js           plugin TUI de OpenCode (Ctrl+Alt+V)
+commands/voice.md       comando /voice de respaldo
+skill/SKILL.md          vocabulario y reglas de voz para el agente
+requirements.txt        TTS local Piper, fijado
+whisper_transcribe.py   worker local: WAV → JSON (corre en el venv)
+tools/install-whisper.sh  crea el venv de STT en ~/.local/state, nunca en el repo
+tools/install-piper.sh    crea el venv de TTS y descarga las voces es/en
+docker/
+  Dockerfile            imagen Vosk (ARG de modelo, sin secretos)
+  .dockerignore         excluye WAV/JSON/estado del contexto de build
+  requirements.stt.txt  vosk fijado
+  transcribe.py         WAV → JSON por stdout
+  build.sh              construye las imágenes es y en
+tests/
+  smoke.py              47 pruebas offline
+  fixtures/             WAV sintético, nunca voz real
+.gitignore              estado, audio, logs y plugin-load.json
 ```
 
-The agent can also initiate a conversation turn with `voice_listen(seconds: 8)`.
+## Requisitos previos
 
-## Languages
+- Python 3.13 en el host (sin paquetes de terceros).
+- `pw-record` / `pw-play` (PipeWire) para captura y reproducción.
+- Para Whisper (default): el venv se instala con el script de abajo; los modelos
+  se descargan una sola vez a `~/.local/state/voice-bridge/whisper/hf`.
+- Para Piper (default TTS): el script de abajo instala `piper-tts==1.8.0` y las
+  voces `es_ES-davefx-medium` / `en_US-lessac-medium` (63 MB c/u) en
+  `~/.local/state/voice-bridge/piper/`.
+- Para Vosk (opcional): Docker con `data-root` en `/home` (en este equipo:
+  `/home/dev/ia_local/docker_data_root`, definido en `/etc/docker/daemon.json`).
+  **Nunca se construye ni se ejecuta nada desde `/`**.
 
-Spanish is the default (`language = "es"`). Change `language` via `rules.toml`,
-a tool argument, or say "switch to English" (the skill applies it). Whisper is
-multilingual; `voice_languages` lists the codes used here.
-
-## Verification
+## Instalación del STT local (Whisper)
 
 ```sh
-python3 tests/smoke.py
+cd herramientas/voice-bridge
+./tools/install-whisper.sh
 python3 voicectl.py status
+python3 voicectl.py transcribe /home/dev/.local/state/voice-bridge/capture.wav
+```
+
+El script fija `faster-whisper==1.2.1` y `av==14.4.0` (con `av==19` falla en
+este equipo). Todo queda bajo `~/.local/state/voice-bridge/whisper/`, fuera del
+repo. No instala paquetes del sistema.
+
+## Instalación del TTS local (Piper)
+
+```sh
+cd herramientas/voice-bridge
+./tools/install-piper.sh
+python3 voicectl.py speak 'Hola, esta es una prueba local.' --no-play
+python3 voicectl.py speak 'Listo, Piper funciona.'
+```
+
+Las voces oficiales `es_ES-davefx-medium` y `en_US-lessac-medium` se descargan
+desde `rhasspy/piper-voices` (fuentes y licencias verificadas el 2026-11-20).
+`[tts].provider = "piper"` es el default; para volver a Cloudflare basta cambiar
+ese valor a `"cloudflare"` (requiere credenciales). No se instala `espeak-ng`
+en el sistema: Piper lo incorpora para la fonemización.
+
+## Construcción de las imágenes Vosk (opcional)
+
+El `data-root` ya está configurado; compruébalo antes de construir:
+
+```sh
+docker info --format '{{.DockerRootDir}}'
+```
+
+Debe empezar por `/home`. Si no, **no construyas**: pide revisión del
+administrador del sistema.
+
+```sh
+cd herramientas/voice-bridge/docker
+./build.sh
+```
+
+`build.sh` crea:
+
+| Imagen | Modelo | Idioma |
+|---|---|---|
+| `voice-bridge-vosk-es:0.42` | `vosk-model-small-es-0.42` | español |
+| `voice-bridge-vosk-en:0.15` | `vosk-model-small-en-us-0.15` | inglés |
+
+Los modelos se descargan durante el build (~39 MB es). El `Dockerfile` no
+incorpora credenciales ni audio. Las etiquetas `org.opencontainers.image.*`
+vinculan la imagen con el repositorio.
+
+GHCR (GitHub Container Registry) está previsto **solo como publicación futura**,
+después de la validación y con criterios de aceptación aprobados. El empuje
+manual requiere un token clásico con `write:packages`; no se usa todavía.
+
+## Uso
+
+`[stt].provider` en `rules.toml` admite:
+
+| Valor | Origen | Credenciales |
+|---|---|---|
+| `whisper` (default) | venv local, modelo `base` int8 | ninguna |
+| `vosk` | contenedor local | ninguna |
+| `cloudflare` | Whisper hospedado | `cf_token` + `cf_account` (0600) |
+| `groq` | Whisper hospedado | `key` (0600) o `GROQ_API_KEY` |
+
+`[tts].provider` admite:
+
+| Valor | Origen | Credenciales |
+|---|---|---|
+| `piper` (default) | venv local, voz `es_ES-davefx-medium` / `en_US-lessac-medium` | ninguna |
+| `cloudflare` | Aura-2 hospedado | `cf_token` + `cf_account` (0600) |
+
+Los archivos de credenciales se leen en cada petición; OpenCode no necesita
+reinicio. **Nunca** se escriben secretos en el repo ni en logs.
+
+Comandos:
+
+```sh
+python3 voicectl.py status
+python3 voicectl.py start                 # pulsar: empieza a grabar
+python3 voicectl.py stop                  # soltar: transcribe y entrega
 python3 voicectl.py listen --seconds 5
-python3 voicectl.py speak "Prueba de audio"
+python3 voicectl.py transcribe archivo.wav
+python3 voicectl.py last
+python3 voicectl.py speak "Probando audio"
+```
+
+Flujo:
+
+```
+tecla abajo -> pw-record 16 kHz mono -> tecla arriba -> WAV
+            -> whisper_transcribe.py (venv local) -> JSON
+            -> last.txt -> PTY de kitty / portapapeles -> OpenCode -> Enter
+            -> respuesta -> piper (venv local) -> pw-play
+
+TUI:  Ctrl+Alt+V -> grabar -> Ctrl+Alt+V -> portapapeles -> prompt.paste
+```
+
+El agente también puede iniciar un turno con `voice_listen(seconds: 8)`.
+
+## Idiomas
+
+`[stt].language = "auto"` deja que Whisper detecte es/en; también se puede fijar
+`es` o `en`, o pasar `language` como argumento de herramienta. Para TTS,
+`[voice].language = "auto"` detecta el idioma del texto y elige la voz Piper
+correspondiente; en textos mixtos conviene fijarlo explícitamente.
+
+## Verificación
+
+```sh
+python3 tests/smoke.py                    # 47 pruebas, sin red
+python3 voicectl.py status
+docker info --format '{{.DockerRootDir}}'
 node --check --input-type=module < plugin/tui.js
 ```
 
-Playback preferences live in `[voice]` of `rules.toml`: `speaker` selects the
-Deepgram Aura-2 voice and `rate` (0.5–2.0) is applied locally with `ffmpeg atempo`.
+Para la prueba real con micrófono (requiere tu validación):
 
-## Privacy and limits
+```sh
+python3 voicectl.py listen --seconds 8
+```
 
-- Audio is sent to the selected provider; keep credentials out of configs/logs.
-- Cloudflare Workers AI: zero data retention, `$0.000453` per audio minute.
-- Groq free tier (if selected): 20 RPM, ~2 h audio/hour, ~8 h/day, 25 MB/upload.
-- TTS: Deepgram Aura-2 (`$0.03/1k chars`), MP3 saved to `reply.mp3` in state dir.
-- Rollback: disable the `voice` MCP server, remove the two Hyprland binds, drop
-  the plugin entry from `cli.json` (backup: `cli.json.bak-20261119-voice-tui`),
-  and leave `~/.local/state/voice-bridge/` untouched for inspection.
+`listen` tiene una ventana fija y recorta si sigues hablando. Para frases largas
+usa el PTT `SUPER+ALT+SHIFT+V` o el toggle `Ctrl+Alt+V` del plugin TUI: no tienen
+límite de duración.
+
+## Privacidad y límites
+
+- Whisper y Piper corren en local; el audio y el texto solo salen de la máquina
+  si eliges un proveedor cloud. Tras la primera descarga, los modelos quedan en
+  caché bajo `/home`.
+- El contenedor Vosk corre con `--network none`: el audio **no sale** de la máquina.
+- No se guarda audio real en el repo; `.gitignore` excluye `*.wav`, `*.mp3`,
+  `state/` y `plugin-load.json`.
+- En la muestra real de 24,23 s, Whisper `base` reconoció `OpenCode` y
+  `comunicarse mediante voz`; Vosk small no. Whisper `small` fue más preciso pero
+  tardó ~46 s de decodificación frente a ~24 s de `base` (int8, 4 hilos).
+- Los modelos Vosk pequeños priorizan velocidad sobre precisión; se mantienen
+  como alternativa, no como default.
+- TTS local con Piper `1.8.0`: WAV en `reply.wav` del state dir, sin cupo ni
+  credenciales. Voz ES `es_ES-davefx-medium` y EN `en_US-lessac-medium`; en la
+  prueba real la síntesis tardó ~10 s y `pw-play` reprodujo el audio.
+- Cloudflare Aura-2 sigue disponible como fallback explícito (`$0.03/1k chars`,
+  MP3 en `reply.mp3`); su cupo puede agotarse, por eso no es el default.
+- Rollback: cambiar `[stt].provider` a `cloudflare`/`groq`, o desactivar el
+  servidor `voice` en `opencode.json`, quitar los dos binds de Hyprland y
+  retirar la entrada del plugin en `cli.json`
+  (backup: `cli.json.bak-20261119-voice-tui`).

@@ -4,3 +4,4 @@ __pycache__/
 recordings/
 .DS_Store
 .obsidian/workspace.json
+.obsidian/graph.json

@@ -122,8 +122,36 @@
 ## F10 - Voice Bridge (prototipo)
 - [x] Modulo `herramientas/voice-bridge/` (MCP + CLI + rules + skill + comando)
 - [x] Push-to-talk `SUPER+ALT+SHIFT+V` press/release (backup + `luac -p`, sin reload)
-- [x] Groq Whisper: español por defecto, prompt con vocabulario del proyecto
+- [x] Cloudflare Whisper por defecto (Groq descartado: `signup_blocked`)
 - [x] Entrega por PTY de kitty con fallback a portapapeles
-- [x] 12 tests offline + MCP descubierto por OpenCode (4 tools)
-- [ ] Validacion con microfono real y GROQ_API_KEY del usuario
-- [ ] Iteracion siguiente: respuesta en audio (TTS)
+- [x] Plugin TUI `Ctrl+Alt+V` (clipboard -> `prompt.paste` -> `input.submit`)
+- [x] MCP con 5 tools: `listen`, `transcribe`, `last`, `languages`, `speak`
+- [x] Backoff 429/5xx + `[api]` en `rules.toml` + toast amigable
+- [x] STT local Vosk en Docker (one-shot, `--network none`, es/en, sin credenciales)
+- [x] Imagenes construidas en local: `voice-bridge-vosk-es:0.42` / `-en:0.15` (lgraph descartado: 3m55/24s; ES grande descartado: 4,24 GB RAM y 118s/24s)
+- [x] `vosk==0.3.45` fijado (0.3.50 no existe para Python 3.12 en PyPI)
+- [x] Estructura del repo: README, `.gitignore`, `docker/`, `tests/fixtures/`
+- [x] 47 tests offline (sin red, microfono ni secretos)
+- [x] Atajos documentados en `KeyHints.sh` y menu rofi (7 modos + voz + Questline)
+- [x] Transcripcion real en español validada (WAV de 21,8 s, sin red)
+- [x] Imagen Vosk es/en cargada y probada (falta muestra de voz en ingles real)
+- [x] Whisper local `base` integrado como default (int8, 4 hilos, beam 5, VAD; venv y cache en `/home`)
+- [x] `faster-whisper==1.2.1` + `av==14.4.0` fijados (`av==19` fallo verificado)
+- [x] Whisper `small` evaluado y descartado (~46 s vs ~24 s de `base`; ~653 MB RAM)
+- [x] Transcripcion real con Whisper `base` validada en WAV de 24,23 s (reconoce `OpenCode` y `comunicarse mediante voz`)
+- [x] Validacion final del dictado por el usuario (2026-11-20): acepto Whisper `base` pese a errores parciales (`OpenCop` por `OpenCode`)
+- [x] TTS local con Piper `1.8.0` como default (venv y voces en `/home`, sin paquetes del sistema)
+- [x] Voces Piper oficiales `es_ES-davefx-medium` / `en_US-lessac-medium` descargadas y reproducidas con `pw-play`
+- [x] Cloudflare TTS queda como fallback explicito (`[tts].provider = "cloudflare"`)
+- [ ] `ql-ffe4bea3`: activacion manos libres «oye, zeep»
+
+## F11 - Modulo documental (planeacion, tareas pendientes)
+- [ ] Aprobacion del administrador para cualquier cambio posterior
+- [ ] Investigacion A: PDF sin LibreOffice (ReportLab / WeasyPrint / Pandoc)
+- [ ] Investigacion B: DOCX (Pandoc frente a python-docx)
+- [ ] Investigacion C: XLSX y CSV (openpyxl + csv, sin Pandas)
+- [ ] Investigacion D: skills de OpenCode y skill `document-workflow`
+- [ ] Investigacion E: sistema de plantillas reutilizables
+- [ ] Disenar contratos de entrada/salida y directorio de entregables
+- [ ] Instalar dependencias aprobadas y ejecutar pruebas de humo
+- [ ] Implementar la skill y validar entregables reales

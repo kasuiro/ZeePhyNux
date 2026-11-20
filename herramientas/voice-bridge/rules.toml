@@ -10,10 +10,30 @@ retry_base_seconds = 2
 retry_max_seconds = 8
 
 [stt]
-provider = "cloudflare"          # cloudflare | groq
-language = "auto"                # Cloudflare detects es/en from the audio
-timeout = 30
+provider = "whisper"             # whisper (local, default) | vosk | cloudflare | groq
+language = "auto"                # auto detects es/en; es/en selectable
+timeout = 120
 hint = "OpenCode, Hyprland, Questline, linux zeep, PipeWire, MCP, voice-bridge, push to talk"
+
+[stt.providers.whisper]
+# faster-whisper 1.2.1 + av 14.4.0 in a venv under ~/.local/state (never /repo).
+model = "base"                   # base int8 ≈ latency de Vosk, mejor precisión
+compute_type = "int8"
+cpu_threads = 4
+beam_size = 5
+vad_filter = true
+python = "~/.local/state/voice-bridge/whisper/venv/bin/python"
+hf_home = "~/.local/state/voice-bridge/whisper/hf"
+timeout = 120
+
+[stt.providers.vosk]
+# One-shot contract: capture.wav is mounted read-only; the container has no
+# network and prints {"text": ..., "engine": "vosk"} to stdout.
+image = "voice-bridge-vosk-es:0.42"
+image_en = "voice-bridge-vosk-en:0.15"
+model = "vosk-model-small-es-0.42"
+model_en = "vosk-model-small-en-us-0.15"
+network = "none"                 # no egress from the STT container
 
 [stt.providers.cloudflare]
 model = "@cf/openai/whisper"
@@ -24,6 +44,7 @@ model = "whisper-large-v3-turbo"
 endpoint = "https://api.groq.com/openai/v1/audio/transcriptions"
 
 [tts]
+provider = "piper"               # piper (local, default) | cloudflare
 model_es = "@cf/deepgram/aura-2-es"
 model_en = "@cf/deepgram/aura-2-en"
 endpoint = "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/run/{model}"
@@ -34,6 +55,14 @@ encoding = "mp3"
 timeout = 30
 max_chars = 2000
 player = "pw-play"
+
+[tts.providers.piper]
+# piper-tts 1.8.0 in a venv under ~/.local/state; voices are 63 MB each.
+python = "~/.local/state/voice-bridge/piper/venv/bin/python"
+data_dir = "~/.local/state/voice-bridge/piper/models"
+voice_es = "es_ES-davefx-medium"
+voice_en = "en_US-lessac-medium"
+timeout = 60
 
 [voice]
 # Bilingual spoken replies: auto follows the detected language, or force es/en.

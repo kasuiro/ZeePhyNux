@@ -1,0 +1,7 @@
+# Local state and generated media must never enter the repo.
+state/
+*.wav
+*.mp3
+*.ogg
+plugin-load.json
+plugin-debug.log

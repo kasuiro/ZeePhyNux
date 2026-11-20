@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """voice-bridge control CLI: capture, transcribe and deliver spoken input.
 
-Zero third-party dependencies. Credentials come from env vars or 0600 files in
+Zero third-party dependencies on the host. The default STT provider is local
+faster-whisper running in a dedicated venv under ~/.local/state/voice-bridge/;
+Vosk in Docker remains available as an alternative. Credentials are only needed
+for the optional cloud providers and come from env vars or 0600 files in
 ~/.config/voice-bridge/: key (Groq), cf_token and cf_account (Cloudflare).
-No secret is ever written to disk by this module.
+No secret is ever written by this module.
 
-Set [stt].provider in rules.toml to "cloudflare" or "groq".
+Set [stt].provider in rules.toml to "whisper", "vosk", "cloudflare" or "groq".
 
     voicectl.py start          # push-to-talk key down
     voicectl.py stop           # key up: transcribe + deliver
@@ -19,6 +22,7 @@ import os
 import pathlib
 import re
 import select
+import shutil
 import signal
 import subprocess
 import sys
@@ -128,7 +132,12 @@ def cloudflare_credentials():
 
 def credential_ready(rules=None):
     rules = rules or load_rules()
-    if provider_config(rules["stt"])["name"] == "cloudflare":
+    name = provider_config(rules["stt"])["name"]
+    if name in ("whisper", "vosk"):
+        # Local STT needs no credentials; runtime availability is reported by
+        # status() instead of being treated as a secret.
+        return True
+    if name == "cloudflare":
         return all(cloudflare_credentials())
     return key_ready()
 
@@ -214,6 +223,10 @@ def transcribe_file(path, rules=None, language=None, hint=None, mock=False):
         return {"text": "mock transcription",
                 "language": "es" if lang == "auto" else lang,
                 "model": "mock", "seconds": wav_seconds(path)}
+    if provider["name"] == "whisper":
+        return _transcribe_whisper(path, provider, lang)
+    if provider["name"] == "vosk":
+        return _transcribe_vosk(path, provider, lang)
     if provider["name"] == "cloudflare":
         return _transcribe_cloudflare(path, provider, hint, lang, rules)
     return _transcribe_groq(path, provider, "es" if lang == "auto" else lang,
@@ -245,6 +258,88 @@ def _transcribe_groq(path, provider, lang, hint, rules=None):
     result = json.loads(raw)
     return {"text": (result.get("text") or "").strip(), "language": lang,
             "model": provider["model"], "seconds": wav_seconds(path)}
+
+
+def _transcribe_whisper(path, provider, lang="es"):
+    """One-shot local STT: run faster-whisper in its venv, read JSON."""
+    python = pathlib.Path(str(provider.get("python", ""))).expanduser()
+    if not python.is_file():
+        raise RuntimeError(
+            "Whisper venv is missing: run the install script or set "
+            "[stt.providers.whisper].python in rules.toml")
+    script = pathlib.Path(str(provider.get("script") or
+                              (ROOT / "whisper_transcribe.py"))).expanduser()
+    if not script.is_file():
+        raise RuntimeError("whisper_transcribe.py is missing from the module")
+    download_root = str(pathlib.Path(str(provider.get("hf_home", ""))).expanduser()) \
+        if provider.get("hf_home") else ""
+    env = os.environ.copy()
+    env.update({
+        "WHISPER_MODEL": str(provider.get("model", "base")),
+        "WHISPER_COMPUTE_TYPE": str(provider.get("compute_type", "int8")),
+        "WHISPER_CPU_THREADS": str(provider.get("cpu_threads", 4)),
+        "WHISPER_BEAM_SIZE": str(provider.get("beam_size", 5)),
+        "WHISPER_LANGUAGE": lang,
+        "WHISPER_VAD": "0" if provider.get("vad_filter", True) is False else "1",
+        "WHISPER_DOWNLOAD_ROOT": download_root,
+        "HF_HOME": download_root or env.get("HF_HOME", ""),
+    })
+    cmd = [str(python), str(script), str(pathlib.Path(path).resolve())]
+    timeout = int(provider.get("timeout", 120))
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                              env=env)
+    except FileNotFoundError as exc:
+        raise RuntimeError("Whisper Python interpreter is not executable") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"Whisper STT timed out after {timeout}s") from exc
+    if proc.returncode != 0:
+        detail = [line for line in (proc.stderr or "").splitlines() if line.strip()]
+        raise RuntimeError("Whisper STT failed: " +
+                           (detail[-1] if detail else f"exit {proc.returncode}"))
+    try:
+        result = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Whisper STT returned invalid JSON") from exc
+    text = str(result.get("text", "")).strip()
+    reported = str(result.get("language") or "").lower()[:2]
+    if reported not in ("es", "en"):
+        reported = detect_language(text, "es") if lang == "auto" else lang[:2]
+    return {"text": text, "language": reported,
+            "model": result.get("model") or provider.get("model", "base"),
+            "seconds": wav_seconds(path)}
+
+
+def _transcribe_vosk(path, provider, lang="es"):
+    """One-shot local STT: mount the WAV into a Vosk container, read JSON."""
+    image = provider.get("image_en") if lang == "en" else provider.get("image")
+    if not image:
+        raise RuntimeError("Vosk image is not configured in rules.toml")
+    if not shutil.which("docker"):
+        raise RuntimeError("Docker is required for the local Vosk provider")
+    wav = str(pathlib.Path(path).resolve())
+    cmd = ["docker", "run", "--rm", "--network",
+           provider.get("network", "none"), "-v", f"{wav}:/in.wav:ro", image]
+    timeout = int(provider.get("timeout", 60))
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError as exc:
+        raise RuntimeError("Docker is required for the local Vosk provider") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"Vosk STT timed out after {timeout}s") from exc
+    if proc.returncode != 0:
+        detail = [line for line in (proc.stderr or "").splitlines() if line.strip()]
+        raise RuntimeError("Vosk STT failed: " +
+                           (detail[-1] if detail else f"exit {proc.returncode}"))
+    try:
+        result = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Vosk STT returned invalid JSON") from exc
+    text = str(result.get("text", "")).strip()
+    reported = detect_language(text, "es") if lang == "auto" else lang
+    model = provider.get("model_en") if reported == "en" else provider.get("model")
+    return {"text": text, "language": reported, "model": model,
+            "seconds": wav_seconds(path)}
 
 
 def _transcribe_cloudflare(path, provider, hint, lang="es", rules=None):
@@ -423,7 +518,7 @@ def last(rules=None):
 
 
 def speak(text, rules=None, language=None, play=True):
-    """Synthesize a spoken reply with Cloudflare Workers AI and optionally play it."""
+    """Synthesize a spoken reply locally with Piper, or via Cloudflare."""
     rules = rules or load_rules()
     content = str(text).strip()
     if not content:
@@ -440,6 +535,84 @@ def speak(text, rules=None, language=None, play=True):
             else configured[:2])
     if lang not in ("es", "en"):
         lang = "es"
+    provider = str(tts.get("provider", "piper")).lower()
+    if provider == "piper":
+        return _speak_piper(content, lang, rules, tts, voice, play)
+    if provider == "cloudflare":
+        return _speak_cloudflare(content, lang, rules, tts, voice, play)
+    raise RuntimeError(f"Unknown TTS provider: {provider}")
+
+
+def _speak_finish(content, lang, path, provider, model, speaker, rules,
+                  tts, voice, play):
+    """Apply the optional rate change, play the WAV/MP3 and build the result."""
+    audio = path.read_bytes()
+    rate = float(voice.get("rate", 1.0))
+    if not 0.5 <= rate <= 2.0:
+        raise ValueError("voice.rate must be between 0.5 and 2.0")
+    if rate != 1.0:
+        adjusted = path.with_suffix(f".rate{path.suffix}")
+        subprocess.run(
+            [voice.get("ffmpeg", "ffmpeg"), "-y", "-loglevel", "error",
+             "-i", str(path), "-filter:a", f"atempo={rate}", str(adjusted)],
+            check=True, capture_output=True, timeout=60,
+        )
+        adjusted.replace(path)
+        audio = path.read_bytes()
+    played = False
+    if play:
+        player = tts.get("player", "pw-play")
+        try:
+            subprocess.run([player, str(path)], check=True, capture_output=True,
+                           timeout=60)
+            played = True
+        except (OSError, subprocess.SubprocessError) as exc:
+            notify(f"voice-bridge: audio saved but playback failed: {exc}")
+    return {"text": content[:200], "language": lang, "provider": provider,
+            "model": model, "speaker": speaker, "rate": rate,
+            "path": str(path), "bytes": len(audio), "played": played}
+
+
+def _speak_piper(content, lang, rules, tts, voice, play):
+    """One-shot local TTS: piper-tts in its venv writes a WAV, then we play it."""
+    cfg = tts.get("providers", {}).get("piper", {})
+    python = pathlib.Path(str(cfg.get("python", ""))).expanduser()
+    if not python.is_file():
+        raise RuntimeError(
+            "Piper venv is missing: run tools/install-piper.sh or set "
+            "[tts.providers.piper].python in rules.toml")
+    data_dir = pathlib.Path(str(cfg.get("data_dir", ""))).expanduser()
+    if not data_dir.is_dir():
+        raise RuntimeError("Piper voice directory is missing: " + str(data_dir))
+    voice_name = cfg.get(f"voice_{lang}", cfg.get("voice_es"))
+    if not voice_name:
+        raise RuntimeError(f"Piper voice for {lang} is not configured")
+    model_file = data_dir / f"{voice_name}.onnx"
+    config_file = data_dir / f"{voice_name}.onnx.json"
+    if not model_file.is_file() or not config_file.is_file():
+        raise RuntimeError(f"Piper voice files are missing for {voice_name}")
+    path = state_dir(rules) / "reply.wav"
+    cmd = [str(python), "-m", "piper", "--data-dir", str(data_dir),
+           "-m", str(voice_name), "-f", str(path), "--", content]
+    timeout = int(cfg.get("timeout", 60))
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError as exc:
+        raise RuntimeError("Piper Python interpreter is not executable") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"Piper TTS timed out after {timeout}s") from exc
+    if proc.returncode != 0:
+        detail = [line for line in (proc.stderr or "").splitlines() if line.strip()]
+        raise RuntimeError("Piper TTS failed: " +
+                           (detail[-1] if detail else f"exit {proc.returncode}"))
+    if not path.is_file() or path.stat().st_size == 0:
+        raise RuntimeError("Piper TTS returned no audio")
+    return _speak_finish(content, lang, path, "piper", "piper-tts",
+                         str(voice_name), rules, tts, voice, play)
+
+
+def _speak_cloudflare(content, lang, rules, tts, voice, play):
+    """Cloudflare Aura-2 fallback: MP3 synthesis plus local playback."""
     model = tts.get(f"model_{lang}", "@cf/deepgram/aura-2-es")
     speaker = voice.get(
         f"speaker_{lang}",
@@ -470,36 +643,20 @@ def speak(text, rules=None, language=None, play=True):
         raise RuntimeError("Cloudflare TTS returned no audio")
     path = state_dir(rules) / "reply.mp3"
     path.write_bytes(audio)
-    rate = float(voice.get("rate", 1.0))
-    if not 0.5 <= rate <= 2.0:
-        raise ValueError("voice.rate must be between 0.5 and 2.0")
-    if rate != 1.0:
-        adjusted = path.with_suffix(".rate.mp3")
-        subprocess.run(
-            [voice.get("ffmpeg", "ffmpeg"), "-y", "-loglevel", "error",
-             "-i", str(path), "-filter:a", f"atempo={rate}", str(adjusted)],
-            check=True, capture_output=True, timeout=60,
-        )
-        adjusted.replace(path)
-        audio = path.read_bytes()
-    played = False
-    if play:
-        player = tts.get("player", "pw-play")
-        try:
-            subprocess.run([player, str(path)], check=True, capture_output=True,
-                           timeout=60)
-            played = True
-        except (OSError, subprocess.SubprocessError) as exc:
-            notify(f"voice-bridge: audio saved but playback failed: {exc}")
-    return {"text": content[:200], "language": lang, "model": model,
-            "speaker": speaker, "rate": rate, "path": str(path),
-            "bytes": len(audio), "played": played}
+    return _speak_finish(content, lang, path, "cloudflare", model, speaker,
+                         rules, tts, voice, play)
 
 
 def status(rules=None):
     rules = rules or load_rules()
     state = state_dir(rules)
     provider = provider_config(rules["stt"])
+    tts = rules.get("tts", {})
+    tts_provider = str(tts.get("provider", "piper"))
+    if tts_provider == "piper":
+        tts_model = tts.get("providers", {}).get("piper", {}).get("voice_es", "")
+    else:
+        tts_model = tts.get("model_es", "")
     return {"state": str(state), "recording": (state / "recording.pid").exists(),
             "provider": provider["name"],
             "credential_ready": credential_ready(rules),
@@ -507,7 +664,8 @@ def status(rules=None):
             "last": last(rules)[:200],
             "model": provider["model"],
             "language": provider["language"],
-            "tts_model": rules.get("tts", {}).get("model_es", ""),
+            "tts_provider": tts_provider,
+            "tts_model": tts_model,
             "deliver": rules["deliver"].get("backend", "none")}
 
 
@@ -526,7 +684,7 @@ def main(argv=None):
     p_speak.add_argument("text")
     p_speak.add_argument("--language", default=None)
     p_speak.add_argument("--no-play", action="store_true",
-                         help="save the MP3 without playing it")
+                         help="save the audio without playing it")
     sub.add_parser("status", help="show configuration status")
     for name in ("start", "stop", "listen", "transcribe"):
         sub.choices[name].add_argument("--mock", action="store_true",

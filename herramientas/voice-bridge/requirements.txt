@@ -1,0 +1,4 @@
+# Optional local TTS runtime. Installed by tools/install-piper.sh into a venv
+# under ~/.local/state/voice-bridge/piper/, never on the host.
+# Pinned version verified with PyPI JSON metadata on 2026-11-20.
+piper-tts==1.8.0
