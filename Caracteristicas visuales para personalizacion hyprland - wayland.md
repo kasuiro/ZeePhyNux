@@ -1,6 +1,6 @@
 
 # Objetivo:
-Diseñar un entorno personalizado y adatable a diferentes situaciones, conservando la elegancia, apariencia, y vision del compositor de hyprland con wayland y alto rendimiento para diversas tareas, momentos y situaciones conservando desde arranque las configuraciones visuales de hyprland  para el usuario, con las siguientes caracteristicas en el UserConfig o donde corresponda la configuracion de cada bloque de tarea en este bloque con las nuevas sugerencias documentadas en la wiki oficial de hyprland con lua, y su arqutectura moderna optimizando en lo posible la utilizacion de los recursos.
+Diseñar un entorno personalizado y adaptable a diferentes situaciones, conservando la elegancia, apariencia, eficiencia, diseño y vision del compositor de hyprland con wayland y alto rendimiento para diversas tareas, momentos y situaciones conservando desde arranque las configuraciones visuales de hyprland  para el usuario, con las siguientes caracteristicas en el UserConfig o donde corresponda la configuracion de cada bloque de tarea en este bloque con las nuevas sugerencias documentadas en la wiki oficial de hyprland con lua, y su arqutectura moderna optimizando en lo posible la utilizacion de los recursos.
 
 # Programas - Ventanas - Terminal - Shell
 *Cualquier ventana, programa y terminal debe conservar  y tener permanentemente lo siguiente al iniciar sesion/encender el equipo:
