@@ -38,6 +38,13 @@ is checked against them.
    notified once per batch; a gift card is rendered only inside `ql claim`,
    never by a rebuild or a resident UI. The MCP server follows the same rule:
    a stdio process owned by the client, never a listener or a background loop.
+   **Approved exception (2026-11-20, `ql-ffe4bea3`):** voice-bridge may run
+   exactly one wake-phrase listener per user session, started by
+   `voicectl wake-start` and ended by `wake-stop`. It reads raw PCM from
+   `pw-record` on stdout, uses no socket, port, network or systemd unit, loads
+   one local Whisper model and writes only its own state file under
+   `~/.local/state/voice-bridge/`. It never writes the core log or the vault.
+   No other daemon is authorised by this exception.
 9. **Zero new packages required.** `ql.py` is stdlib-only; the UI reuses what the
    desktop already has (Python + GTK, already installed for waybar/swaync).
 

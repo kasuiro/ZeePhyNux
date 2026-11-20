@@ -15,14 +15,17 @@ nube (Cloudflare, Groq) como opción explícita, pero ya no son el camino princi
 - STT local Vosk (es/en) disponible con `[stt].provider = "vosk"`.
 - TTS local Piper `1.8.0` (es/en) como default; Cloudflare Aura-2 queda como fallback.
 - PTT `SUPER+ALT+SHIFT+V` y plugin TUI `Ctrl+Alt+V`.
-- 47 pruebas offline, sin red, micrófono ni credenciales.
+- Activación manos libres por sesión: «oye, zeep» / «oye, linux zeep».
+- 62 pruebas offline, sin red, micrófono ni credenciales.
 
 ## Estructura
 
 ```
 rules.toml              defaults; nunca guarda credenciales
-voicectl.py             CLI: capture / transcribe / deliver / speak
+voicectl.py             CLI: capture / transcribe / deliver / speak / wake-*
 mcp.py                  servidor MCP stdio: listen, transcribe, last, languages, speak
+wake.py                 helpers puros de frase de activación
+wake_listener.py        listener por sesión: PCM crudo + Whisper sesgado
 plugin/tui.js           plugin TUI de OpenCode (Ctrl+Alt+V)
 commands/voice.md       comando /voice de respaldo
 skill/SKILL.md          vocabulario y reglas de voz para el agente
@@ -145,6 +148,9 @@ python3 voicectl.py listen --seconds 5
 python3 voicectl.py transcribe archivo.wav
 python3 voicectl.py last
 python3 voicectl.py speak "Probando audio"
+python3 voicectl.py wake-start              # activar «oye, zeep» por sesión
+python3 voicectl.py wake-stop               # apagar el listener
+python3 voicectl.py wake-dictate            # dictado por silencio (usan el trigger)
 ```
 
 Flujo:
@@ -158,6 +164,9 @@ tecla abajo -> pw-record 16 kHz mono -> tecla arriba -> WAV
 TUI:  Ctrl+Alt+V -> grabar -> Ctrl+Alt+V -> portapapeles -> prompt.paste
 ```
 
+Manos libres: `wake-start` -> «oye, zeep» -> Piper «Escuchando» -> dictado
+hasta silencio -> Whisper -> PTY o portapapeles -> Enter -> `wake-stop`.
+
 El agente también puede iniciar un turno con `voice_listen(seconds: 8)`.
 
 ## Idiomas
@@ -170,7 +179,7 @@ correspondiente; en textos mixtos conviene fijarlo explícitamente.
 ## Verificación
 
 ```sh
-python3 tests/smoke.py                    # 47 pruebas, sin red
+python3 tests/smoke.py                    # 62 pruebas, sin red
 python3 voicectl.py status
 docker info --format '{{.DockerRootDir}}'
 node --check --input-type=module < plugin/tui.js
@@ -184,7 +193,9 @@ python3 voicectl.py listen --seconds 8
 
 `listen` tiene una ventana fija y recorta si sigues hablando. Para frases largas
 usa el PTT `SUPER+ALT+SHIFT+V` o el toggle `Ctrl+Alt+V` del plugin TUI: no tienen
-límite de duración.
+límite de duración. El flujo manos libres (`wake-start`) usa fin por silencio con
+tope duro de 30 s definido en `[wake]`; el listener es el único proceso de
+escucha y solo vive durante la sesión (excepción aprobada en `RULES.md` 8).
 
 ## Privacidad y límites
 

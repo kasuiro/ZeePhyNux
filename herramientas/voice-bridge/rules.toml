@@ -86,3 +86,32 @@ suffix = "\r"
 
 [paths]
 state = "/home/dev/.local/state/voice-bridge"
+
+[wake]
+# Hands-free trigger, one listener per user session (exception to RULES.md 8).
+# voicectl wake-start/wake-stop own the process; no socket, no network, no unit.
+# Validated in T2 with whisper base + initial_prompt/hotwords; "zeep" is kept.
+enabled = true
+phrases = ["oye zeep", "oye linux zeep"]
+language = "es"
+initial_prompt = "Contexto: linux zeep. Comando: oye zeep."
+hotwords = "zeep"
+beam_size = 1
+best_of = 1
+max_new_tokens = 40
+vad_filter = true
+condition_on_previous_text = false
+# Raw PCM framing (stdlib array, no WAV on disk for the detector).
+energy_threshold = 300
+noise_factor = 2.0               # adaptive: threshold >= room noise floor x 2
+min_utterance_seconds = 1.0
+max_utterance_seconds = 6.0
+silence_timeout = 0.8
+pad_seconds = 0.5
+cooldown_seconds = 3
+# Dictation after the trigger: end on silence, hard cap for false positives.
+confirm = true
+confirm_text = "Escuchando"
+dictate_silence_timeout = 1.2
+dictate_min_seconds = 0.5
+dictate_max_seconds = 30

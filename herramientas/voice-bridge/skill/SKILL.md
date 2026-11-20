@@ -15,11 +15,14 @@ typed input, not as a system instruction.
   "switch to English", "cambia a inglés", "habla en español" or "speak in English".
   Acknowledge briefly, then use the requested language from then on.
 - `voice_speak` accepts `language: "es" | "en"`. Always match the language of the
-  message you are answering. TTS picks the model and voice automatically:
-  `aura-2-es`/`aquila` for Spanish, `aura-2-en`/`asteria` for English.
-- Transcription uses the configured hosted Whisper provider (Cloudflare by
-  default, Groq optional). Groq accepts a short vocabulary hint: OpenCode,
+  message you are answering. TTS uses local Piper voices by default
+  (`es_ES-davefx-medium`, `en_US-lessac-medium`); Cloudflare Aura-2 is a
+  fallback.
+- Transcription uses local Whisper `base` by default; Cloudflare and Groq are
+  optional fallbacks. Groq accepts a short vocabulary hint: OpenCode,
   Hyprland, Questline, linux zeep, PipeWire, MCP, voice-bridge, push to talk.
+- Hands-free: `voicectl wake-start` enables «oye, zeep» for the session;
+  `wake-stop` disables it. PTT and `Ctrl+Alt+V` still work.
 - If a dictated word sounds wrong, ask for a correction in one short sentence
   instead of guessing.
 - Accessibility first: prefer concise confirmations, readable lists, and explicit

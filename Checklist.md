@@ -143,7 +143,7 @@
 - [x] TTS local con Piper `1.8.0` como default (venv y voces en `/home`, sin paquetes del sistema)
 - [x] Voces Piper oficiales `es_ES-davefx-medium` / `en_US-lessac-medium` descargadas y reproducidas con `pw-play`
 - [x] Cloudflare TTS queda como fallback explicito (`[tts].provider = "cloudflare"`)
-- [ ] `ql-ffe4bea3`: activacion manos libres «oye, zeep»
+- [x] `ql-ffe4bea3`: activacion manos libres «oye, zeep» — plan en `Projects/voice-bridge.md` (T1-T5 hechos: 4 activaciones reales, 62 tests, commit)
 
 ## F11 - Modulo documental (fases 0-5 completadas)
 - [x] Aprobacion del administrador para fases 2-4 y fase 5 condicionada (2026-11-20)

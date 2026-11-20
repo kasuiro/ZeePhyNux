@@ -56,7 +56,7 @@ TOOLS = [
     },
     {
         "name": "speak",
-        "description": "Speak an answer aloud with Cloudflare TTS. Use when the user asks for an audio reply.",
+        "description": "Speak an answer aloud with the configured local Piper voice (Cloudflare is a fallback). Use when the user asks for an audio reply.",
         "inputSchema": {
             "type": "object",
             "properties": {

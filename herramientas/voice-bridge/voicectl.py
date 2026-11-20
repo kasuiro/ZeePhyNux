@@ -15,6 +15,8 @@ Set [stt].provider in rules.toml to "whisper", "vosk", "cloudflare" or "groq".
     voicectl.py listen --seconds 5
     voicectl.py transcribe FILE
     voicectl.py last
+    voicectl.py wake-start|wake-stop   # session-scoped hands-free trigger
+    voicectl.py wake-dictate           # said phrase: end-on-silence dictation
 """
 import argparse
 import json
@@ -517,6 +519,177 @@ def last(rules=None):
     return path.read_text(encoding="utf-8") if path.is_file() else ""
 
 
+def _live_pid(pid_file):
+    """Return the live PID in a pid file, or None after cleaning a stale one."""
+    if not pid_file.exists():
+        return None
+    try:
+        pid = int(pid_file.read_text().strip())
+        os.kill(pid, 0)
+        return pid
+    except (ValueError, ProcessLookupError, PermissionError):
+        pid_file.unlink(missing_ok=True)
+        return None
+
+
+def wake_start(rules=None):
+    """Start the session-scoped wake listener. No socket, no systemd unit."""
+    rules = rules or load_rules()
+    config = rules.get("wake", {})
+    if not config.get("enabled", True):
+        return {"listening": False, "error": "wake is disabled in rules.toml"}
+    state = state_dir(rules)
+    pid_file = state / "wake.pid"
+    existing = _live_pid(pid_file)
+    if existing is not None:
+        return {"listening": True, "already": True, "pid": existing}
+    provider = rules.get("stt", {}).get("providers", {}).get("whisper", {})
+    python = pathlib.Path(str(provider.get("python", ""))).expanduser()
+    if not python.is_file():
+        raise RuntimeError(
+            "Whisper venv is missing: run the install script or set "
+            "[stt.providers.whisper].python in rules.toml")
+    script = ROOT / "wake_listener.py"
+    if not script.is_file():
+        raise RuntimeError("wake_listener.py is missing from the module")
+    cmd = [str(python), str(script), "--config", str(DEFAULT_RULES)]
+    with open(state / "wake.log", "ab") as log:
+        proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT,
+                                stdin=subprocess.DEVNULL,
+                                start_new_session=True)
+    pid_file.write_text(str(proc.pid))
+    return {"listening": True, "already": False, "pid": proc.pid,
+            "phrases": list(config.get("phrases") or ["oye zeep",
+                                                      "oye linux zeep"])}
+
+
+def wake_stop(rules=None):
+    """Stop the session listener and leave no pid file or child behind."""
+    rules = rules or load_rules()
+    pid_file = state_dir(rules) / "wake.pid"
+    pid = _live_pid(pid_file)
+    if pid is None:
+        return {"listening": False, "already": True}
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    for _ in range(30):
+        try:
+            os.kill(pid, 0)
+            time.sleep(0.1)
+        except ProcessLookupError:
+            break
+    pid_file.unlink(missing_ok=True)
+    still_running = False
+    try:
+        os.kill(pid, 0)
+        still_running = True
+    except ProcessLookupError:
+        pass
+    return {"listening": still_running, "already": False, "pid": pid}
+
+
+def wake_dictate(rules=None, mock=False):
+    """Dictation after a wake phrase: end on silence, never exceed a hard cap.
+
+    Uses its own short-lived raw recorder; it does not touch recording.pid and
+    always terminates the child, even on timeout or error.
+    """
+    rules = rules or load_rules()
+    config = rules.get("wake", {})
+    rec = rules.get("record", {})
+    state = state_dir(rules)
+    if config.get("confirm", True):
+        try:
+            speak(str(config.get("confirm_text", "Escuchando")), rules)
+        except Exception as exc:  # a missing voice must not block dictation
+            notify(f"voice-bridge: confirmación no disponible: {exc}"[:120])
+    rate = int(rec.get("rate", 16000))
+    chunk_bytes = rate * 2 // 10
+    cmd = ["pw-record",
+           "--rate", str(rate),
+           "--channels", str(rec.get("channels", 1)),
+           "--format", str(rec.get("format", "s16")),
+           "-", "-a"]
+    log = open(state / "wake-dictate.log", "ab")
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=log,
+                            start_new_session=True)
+    pcm = bytearray()
+    heard = False
+    timed_out = False
+    print(json.dumps({"event": "dictate-start",
+                      "cap_seconds": float(config.get("dictate_max_seconds", 30))}),
+          flush=True)
+    try:
+        from wake_listener import NoiseAwareSplitter
+        splitter = NoiseAwareSplitter(
+            rate=rate,
+            threshold=float(config.get("energy_threshold", 300)),
+            min_seconds=float(config.get("dictate_min_seconds", 0.5)),
+            max_seconds=float(config.get("dictate_max_seconds", 30)),
+            silence_timeout=float(config.get("dictate_silence_timeout", 1.2)),
+            pad_seconds=0.0,
+            factor=float(config.get("noise_factor", 2.0)),
+        )
+        deadline = time.monotonic() + float(config.get("dictate_max_seconds", 30))
+        while time.monotonic() < deadline:
+            readable, _, _ = select.select([proc.stdout], [], [], 0.2)
+            if not readable:
+                if proc.poll() is not None:
+                    break
+                continue
+            chunk = proc.stdout.read(chunk_bytes)
+            if not chunk:
+                break
+            done = splitter.feed(chunk)
+            if splitter.rms(chunk) >= splitter.threshold:
+                heard = True
+            pcm.extend(chunk)
+            if done:
+                break
+        else:
+            timed_out = True
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=2)
+        if proc.stdout is not None:
+            proc.stdout.close()
+        log.close()
+    if timed_out:
+        if pcm:
+            with wave.open(str(state / "wake-timeout.wav"), "wb") as handle:
+                handle.setnchannels(1)
+                handle.setsampwidth(2)
+                handle.setframerate(rate)
+                handle.writeframes(bytes(pcm))
+        message = "Dictado cancelado: tiempo límite alcanzado"
+        notify(message)
+        return {"error": message, "timed_out": True,
+                "captured_seconds": round(len(pcm) / (rate * 2), 2),
+                "heard": heard}
+    if not heard or not pcm:
+        return {"text": "", "delivered_via": "none", "seconds": 0.0}
+    wav = state / "capture.wav"
+    with wave.open(str(wav), "wb") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(rate)
+        handle.writeframes(bytes(pcm))
+    result = transcribe_file(wav, rules, mock=mock)
+    (state / "last.json").write_text(
+        json.dumps(result, ensure_ascii=False, indent=2))
+    (state / "last.txt").write_text(result["text"])
+    result["delivered_via"] = deliver(result["text"], rules)
+    notify(result["text"][:120] or "(empty transcription)")
+    return result
+
+
 def speak(text, rules=None, language=None, play=True):
     """Synthesize a spoken reply locally with Piper, or via Cloudflare."""
     rules = rules or load_rules()
@@ -658,6 +831,7 @@ def status(rules=None):
     else:
         tts_model = tts.get("model_es", "")
     return {"state": str(state), "recording": (state / "recording.pid").exists(),
+            "wake_listening": (state / "wake.pid").exists(),
             "provider": provider["name"],
             "credential_ready": credential_ready(rules),
             "key_ready": key_ready(),
@@ -680,13 +854,16 @@ def main(argv=None):
     p_transcribe.add_argument("file")
     p_transcribe.add_argument("--language", default=None)
     sub.add_parser("last", help="print the last transcript")
+    sub.add_parser("wake-start", help="start the session wake listener")
+    sub.add_parser("wake-stop", help="stop the session wake listener")
+    sub.add_parser("wake-dictate", help="dictate until silence after a wake phrase")
     p_speak = sub.add_parser("speak", help="synthesize and play a reply")
     p_speak.add_argument("text")
     p_speak.add_argument("--language", default=None)
     p_speak.add_argument("--no-play", action="store_true",
                          help="save the audio without playing it")
     sub.add_parser("status", help="show configuration status")
-    for name in ("start", "stop", "listen", "transcribe"):
+    for name in ("start", "stop", "listen", "transcribe", "wake-dictate"):
         sub.choices[name].add_argument("--mock", action="store_true",
                                        help="skip the network call (tests)")
     args = parser.parse_args(argv)
@@ -705,6 +882,12 @@ def main(argv=None):
         elif args.cmd == "last":
             print(last(rules))
             return 0
+        elif args.cmd == "wake-start":
+            result = wake_start(rules)
+        elif args.cmd == "wake-stop":
+            result = wake_stop(rules)
+        elif args.cmd == "wake-dictate":
+            result = wake_dictate(rules, args.mock)
         else:
             result = status(rules)
     except Exception as exc:

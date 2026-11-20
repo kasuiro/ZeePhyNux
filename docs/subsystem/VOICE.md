@@ -47,7 +47,15 @@ key up   ─→ Whisper venv (local) ─→ last.txt + last.json ─→ PTY / cl
 ```
 
 `~/.local/state/voice-bridge/` holds the WAV, recorder pid, log and last result.
-`rules.toml` holds non-secret defaults. No daemon, no socket, no port.
+`rules.toml` holds non-secret defaults. No daemon, no socket, no port, except
+the one session-scoped wake listener approved in RULES.md 8: `voicectl
+wake-start` / `wake-stop` run `wake_listener.py` for the current session only.
+It reads `pw-record - -a` raw PCM, groups utterances by energy, detects with the
+same local Whisper worker using `initial_prompt`/`hotwords`, then calls
+`voicectl wake-dictate`: local Piper confirmation, recording until silence with
+a 30 s hard cap, Whisper transcription and the normal PTY/clipboard delivery.
+No socket, no network, no PID file outside the state directory. PTT and
+`Ctrl+Alt+V` are unchanged.
 
 ## 4. Tools
 

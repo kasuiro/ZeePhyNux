@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Offline smoke tests for voice-bridge. No network, no microphone, no vault."""
+import array
 import copy
 import io
 import json
+import os
 import pathlib
+import signal
 import subprocess
 import sys
 import tempfile
@@ -16,6 +19,9 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import mcp  # noqa: E402
 import voicectl  # noqa: E402
+import wake  # noqa: E402
+import wake_listener  # noqa: E402
+import whisper_transcribe  # noqa: E402
 
 
 class FakeResponse(io.BytesIO):
@@ -574,6 +580,267 @@ class VoiceBridgeSmoke(unittest.TestCase):
             with self.assertRaises(RuntimeError) as caught:
                 voicectl.transcribe_file(self.wav, rules)
         self.assertIn("timed out", str(caught.exception))
+
+    def test_wake_default_phrases_and_grammar(self):
+        self.assertEqual(wake.DEFAULT_PHRASES,
+                         ("oye zeep", "oye linux zeep"))
+        grammar = json.loads(wake.grammar_json())
+        self.assertEqual(grammar, ["oye zeep", "oye linux zeep"])
+
+    def test_wake_normalize_strips_accents_and_punctuation(self):
+        self.assertEqual(wake.normalize("¡Oye, Zéep!"), "oye zeep")
+        self.assertEqual(wake.normalize(None), "")
+
+    def test_wake_matched_requires_a_full_approved_phrase(self):
+        self.assertTrue(wake.matched("oye, linux zeep"))
+        self.assertFalse(wake.matched("oye"))
+        self.assertFalse(wake.matched("hola hacer"))
+
+    def test_wake_fuzzy_accepts_prefix_rejects_unrelated(self):
+        self.assertTrue(wake.fuzzy_matched("oye linux", ["oye linux zeep"]))
+        self.assertFalse(wake.fuzzy_matched("hola hacer", ["oye linux zeep"]))
+
+    def test_wake_probe_transcripts_do_not_trigger(self):
+        # Transcripts actually produced by vosk-model-small-es-0.42 in T2.
+        for transcript in ("oye", "oye usted", "hola hacer", "okay se"):
+            self.assertFalse(wake.matched(transcript), transcript)
+
+    def test_wake_env_uses_validated_parameters(self):
+        env = wake_listener.wake_env(self.rules)
+        self.assertEqual(env["WHISPER_LANGUAGE"], "es")
+        self.assertEqual(env["WHISPER_BEAM_SIZE"], "1")
+        self.assertEqual(env["WHISPER_BEST_OF"], "1")
+        self.assertEqual(env["WHISPER_MAX_NEW_TOKENS"], "40")
+        self.assertEqual(env["WHISPER_VAD"], "1")
+        self.assertEqual(env["WHISPER_CONDITION_ON_PREVIOUS_TEXT"], "0")
+        self.assertIn("zeep", env["WHISPER_INITIAL_PROMPT"])
+        self.assertEqual(env["WHISPER_HOTWORDS"], "zeep")
+        self.assertTrue(env["WHISPER_DOWNLOAD_ROOT"].endswith("whisper/hf"))
+
+    def test_wake_splitter_groups_speech_and_drops_short_noise(self):
+        loud = b"\x20\x10" * 800
+        quiet = b"\x00\x00" * 1600
+        splitter = wake_listener.UtteranceSplitter(
+            min_seconds=1.0, silence_timeout=0.8)
+        chunks = splitter.feed(quiet)
+        for _ in range(11):
+            chunks += splitter.feed(loud)
+        for _ in range(10):
+            chunks += splitter.feed(quiet)
+        self.assertEqual(len(chunks), 1)
+        with wave.open(wake_listener.pcm_to_wav(chunks[0]), "rb") as handle:
+            self.assertEqual(handle.getnchannels(), 1)
+            self.assertEqual(handle.getsampwidth(), 2)
+            self.assertEqual(handle.getframerate(), 16000)
+            self.assertGreaterEqual(handle.getnframes(), 16000)
+        noise = wake_listener.UtteranceSplitter(
+            min_seconds=1.0, silence_timeout=0.8)
+        short = noise.feed(loud)
+        for _ in range(9):
+            short += noise.feed(quiet)
+        self.assertEqual(short, [])
+
+    def test_wake_adaptive_splitter_ignores_room_noise(self):
+        noise = b"\xe0\x01" * 1600
+        loud = b"\x20\x10" * 800
+        splitter = wake_listener.NoiseAwareSplitter(
+            min_seconds=1.0, silence_timeout=0.8)
+        chunks = []
+        for _ in range(5):
+            chunks += splitter.feed(noise)
+        for _ in range(11):
+            chunks += splitter.feed(loud)
+        for _ in range(8):
+            chunks += splitter.feed(noise)
+        self.assertEqual(len(chunks), 1)
+        self.assertGreater(splitter.threshold, 300)
+
+    def test_wake_detect_reuses_whisper_worker(self):
+        with mock.patch.object(
+                whisper_transcribe, "transcribe",
+                return_value={"text": "Oye zeep.", "model": "base"}) as call:
+            result, matched = wake_listener.detect(
+                mock.Mock(), b"\x00\x00" * 1000, {"WHISPER_MODEL": "base"},
+                ("oye zeep",), pad_seconds=0)
+        self.assertTrue(matched)
+        self.assertEqual(result["text"], "Oye zeep.")
+        self.assertIsInstance(call.call_args.args[1], io.BytesIO)
+
+    def test_whisper_worker_optional_kwargs_and_cli_defaults(self):
+        class FakeInfo:
+            language = "es"
+            language_probability = 1.0
+
+        class FakeModel:
+            def transcribe(self, audio, **kwargs):
+                self.kwargs = kwargs
+                return [mock.Mock(text="Oye zeep.")], FakeInfo()
+
+        model = FakeModel()
+        env = {
+            "WHISPER_LANGUAGE": "es", "WHISPER_BEAM_SIZE": "1",
+            "WHISPER_BEST_OF": "1", "WHISPER_MAX_NEW_TOKENS": "40",
+            "WHISPER_VAD": "1",
+            "WHISPER_CONDITION_ON_PREVIOUS_TEXT": "0",
+            "WHISPER_INITIAL_PROMPT": "Comando: oye zeep.",
+            "WHISPER_HOTWORDS": "zeep",
+        }
+        result = whisper_transcribe.transcribe(model, io.BytesIO(), env)
+        self.assertEqual(result["text"], "Oye zeep.")
+        self.assertEqual(model.kwargs["beam_size"], 1)
+        self.assertEqual(model.kwargs["best_of"], 1)
+        self.assertEqual(model.kwargs["max_new_tokens"], 40)
+        self.assertFalse(model.kwargs["condition_on_previous_text"])
+        self.assertEqual(model.kwargs["hotwords"], "zeep")
+        plain = FakeModel()
+        whisper_transcribe.transcribe(plain, io.BytesIO(), {})
+        self.assertNotIn("best_of", plain.kwargs)
+        self.assertNotIn("hotwords", plain.kwargs)
+        self.assertNotIn("max_new_tokens", plain.kwargs)
+
+    def test_wake_listener_run_triggers_once_without_microphone(self):
+        class FakeProc:
+            def __init__(self, data):
+                self.stdout = io.BytesIO(data)
+                self.running = True
+
+            def poll(self):
+                return None if self.running else 0
+
+            def terminate(self):
+                self.running = False
+
+            def wait(self, timeout=None):
+                return 0
+
+            def kill(self):
+                self.running = False
+
+        loud = b"\x20\x10" * 800
+        softer = b"\xe8\x03" * 800
+        quiet = b"\x00\x00" * 1600
+        audio = loud * 11 + quiet * 10 + softer * 11 + quiet * 10
+
+        class FakeModel:
+            def transcribe(self, handle, **kwargs):
+                pcm = handle.read()[44:]
+                values = array.array("h", pcm)
+                peak = max(values) if values else 0
+                text = "Oye zeep." if peak > 3000 else "Hola, sir."
+                segments = [mock.Mock(text=text)]
+                info = mock.Mock(language="es", language_probability=1.0)
+                return segments, info
+
+        fired = []
+        rules = copy.deepcopy(self.rules)
+        rules["wake"]["cooldown_seconds"] = 0
+        listener = wake_listener.Listener(
+            rules, state=self.tmp.name, model=FakeModel(),
+            recorder=lambda: FakeProc(audio),
+            trigger=lambda: fired.append(True))
+        self.assertEqual(listener.run(), 0)
+        self.assertEqual(len(fired), 1)
+        state = json.loads((pathlib.Path(self.tmp.name) / "wake.json").read_text())
+        self.assertIn("text", state)
+
+    def test_wake_start_stop_leaves_no_pid(self):
+        self.rules["stt"]["providers"]["whisper"]["python"] = sys.executable
+        fake = mock.Mock(pid=4242)
+        effects = [None, None, ProcessLookupError, ProcessLookupError]
+        with mock.patch.object(voicectl.subprocess, "Popen", return_value=fake), \
+                mock.patch.object(voicectl.os, "kill", side_effect=effects) as kill:
+            started = voicectl.wake_start(self.rules)
+            self.assertTrue(started["listening"])
+            self.assertEqual(started["pid"], 4242)
+            self.assertTrue((pathlib.Path(self.tmp.name) / "wake.pid").is_file())
+            stopped = voicectl.wake_stop(self.rules)
+            self.assertFalse(stopped["listening"])
+        self.assertEqual(kill.call_args_list[1][0][1], signal.SIGTERM)
+        self.assertFalse((pathlib.Path(self.tmp.name) / "wake.pid").exists())
+
+    def _fake_raw_recorder(self, data=b"", close_writer=True):
+        def safe_close(fd):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+        read_fd, write_fd = os.pipe()
+        if data:
+            os.write(write_fd, data)
+        if close_writer:
+            os.close(write_fd)
+        else:
+            self.addCleanup(safe_close, write_fd)
+        self.addCleanup(safe_close, read_fd)
+
+        class FakeProc:
+            def __init__(self, stream):
+                self.stdout = stream
+                self.running = True
+
+            def poll(self):
+                return None if self.running else 0
+
+            def terminate(self):
+                self.running = False
+
+            def wait(self, timeout=None):
+                return 0
+
+            def kill(self):
+                self.running = False
+
+        return FakeProc(os.fdopen(read_fd, "rb"))
+
+    def test_wake_dictate_ends_on_silence_and_delivers(self):
+        loud = b"\x20\x10" * 800
+        quiet = b"\x00\x00" * 1600
+        rules = copy.deepcopy(self.rules)
+        rules["wake"]["confirm"] = True
+        rules["wake"]["dictate_silence_timeout"] = 0.5
+        proc = self._fake_raw_recorder(loud * 6 + quiet * 6)
+        order = []
+        result = {"text": "hola zeep", "language": "es", "model": "base",
+                  "seconds": 1.0}
+        with mock.patch.object(voicectl, "speak",
+                               side_effect=lambda *a, **k: order.append("speak")), \
+                mock.patch.object(voicectl.subprocess, "Popen",
+                                  side_effect=lambda *a, **k: (
+                                      order.append("record"), proc)[1]), \
+                mock.patch.object(voicectl, "transcribe_file",
+                                  return_value=result), \
+                mock.patch.object(voicectl, "deliver", return_value="none"), \
+                mock.patch.object(voicectl, "notify"):
+            answer = voicectl.wake_dictate(rules, mock=True)
+        self.assertEqual(answer["text"], "hola zeep")
+        self.assertEqual(answer["delivered_via"], "none")
+        self.assertEqual(order, ["speak", "record"])
+        self.assertFalse(proc.running)
+        state = pathlib.Path(self.tmp.name)
+        self.assertTrue((state / "capture.wav").is_file())
+        self.assertEqual((state / "last.txt").read_text(), "hola zeep")
+
+    def test_wake_dictate_hard_timeout_leaves_no_recorder(self):
+        rules = copy.deepcopy(self.rules)
+        rules["wake"]["confirm"] = False
+        rules["wake"]["dictate_max_seconds"] = 0.2
+        proc = self._fake_raw_recorder(close_writer=False)
+        with mock.patch.object(voicectl.subprocess, "Popen", return_value=proc), \
+                mock.patch.object(voicectl, "notify"), \
+                mock.patch.object(voicectl, "transcribe_file") as transcribe:
+            answer = voicectl.wake_dictate(rules, mock=True)
+        self.assertTrue(answer["timed_out"])
+        self.assertFalse(proc.running)
+        transcribe.assert_not_called()
+        self.assertFalse((pathlib.Path(self.tmp.name) / "recording.pid").exists())
+
+    def test_status_reports_wake_listener(self):
+        state = pathlib.Path(self.tmp.name)
+        (state / "wake.pid").write_text("4242")
+        self.assertTrue(voicectl.status(self.rules)["wake_listening"])
+        (state / "wake.pid").unlink()
+        self.assertFalse(voicectl.status(self.rules)["wake_listening"])
 
 
 if __name__ == "__main__":
