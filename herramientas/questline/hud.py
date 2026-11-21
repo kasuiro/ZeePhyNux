@@ -128,6 +128,7 @@ class Hud:
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.box = box
         box.get_style_context().add_class("hud")
         box.set_tooltip_text("Arrastra para mover este panel")
         box.set_events(Gdk.EventMask.BUTTON_PRESS_MASK |
@@ -168,10 +169,13 @@ class Hud:
         box.pack_start(self.time_label, False, False, 0)
 
         win.add(box)
+        # gtk-layer-shell binds the output when the surface is created, so pick
+        # the focused monitor once, before mapping. Switching it later destroys
+        # the surface and show_all() cannot recreate it.
+        self.pick_monitor()
         win.show_all()
         self.reload()
 
-        self.follow_monitor()
         self.poll_hyprland()
         monitor = Gio.File.new_for_path(str(HUD_FILE)).monitor_file(
             Gio.FileMonitorFlags.NONE, None)
@@ -203,23 +207,17 @@ class Hud:
         except Exception:
             return []
 
-    def follow_monitor(self, name: str = ""):
-        """Anchor to the monitor that has the focus right now."""
+    def pick_monitor(self):
+        """Anchor once to the monitor focused at startup, before mapping."""
         monitors = self.hypr_monitors()
-        focused = next((m for m in monitors
-                        if (name and m.get("name") == name) or (not name and m.get("focused"))),
-                       None)
+        focused = next((m for m in monitors if m.get("focused")), None)
         if not focused:
             return False
         mon = self.gdk_monitor_for(focused)
         if mon is None:
             return False
         self.current_output = focused["name"]
-        # gtk-layer-shell fixes the output when the surface is realised, so the
-        # window is re-mapped to move it to another screen.
-        self.win.hide()
         GtkLayerShell.set_monitor(self.win, mon)
-        self.apply_visibility(force=True)   # the surface was just destroyed
         return False
 
     # ------------------------------------------------------------------ hypr
@@ -237,10 +235,6 @@ class Hud:
             active = {}
         self.fullscreen = bool(active.get("fullscreen", 0))
         self.apply_visibility()
-        monitors = self.hypr_monitors()
-        focused = next((m.get("name") for m in monitors if m.get("focused")), "")
-        if focused and focused != self.current_output:
-            self.follow_monitor(focused)
         return True
 
     # ------------------------------------------------------------------ drag
@@ -274,10 +268,9 @@ class Hud:
         if hidden == self.hidden and not force:
             return
         self.hidden = hidden
-        if hidden:
-            self.win.hide()
-        else:
-            self.win.show_all()
+        # Never unmap the layer-surface toplevel: show_all() cannot reliably
+        # recreate the surface. Keep it mapped and hide only the content box.
+        self.box.set_visible(not hidden)
 
     def toggle(self):
         """SUPER+ALT+SHIFT+H. Overrides the fullscreen rule while it is off."""
